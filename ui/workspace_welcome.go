@@ -36,7 +36,7 @@ func (app *workspaceWindow) showWelcome() {
 	}
 	*welcome = workspaceWelcome{workspace: app, returnTo: app.win, documents: app.welcomeDocuments()}
 	win := mygo.NewWindow(mygo.WindowOptions{
-		Title: "Welcome Back", Width: welcomeWidth, Height: welcomeHeight, Hidden: true,
+		Title: app.tr("Welcome Back", "欢迎回来"), Width: welcomeWidth, Height: welcomeHeight, Hidden: true,
 		TitleBarStyle: mygo.TitleBarHiddenInset, TitleBarHeight: 32,
 		TrafficLightPosition: &mygo.Point{X: 8, Y: 8},
 		DisableResize:        true, DisableMinimize: true, DisableMaximize: true, DisableFullScreen: true,
@@ -45,7 +45,7 @@ func (app *workspaceWindow) showWelcome() {
 			workspace.applyAppearance(c)
 			closeWelcome := func() { welcome.dismiss(nil) }
 			c.OnWindowShortcut(mygoui.Cmd, mygoui.KeyW, closeWelcome)
-			drawWelcomeContent(c, workspace.blackout, welcome.documents, func(path string) {
+			drawWelcomeContent(c, workspace.interfaceLanguage(), workspace.blackout, welcome.documents, func(path string) {
 				welcome.dismiss(func() { workspace.openWelcomeDocument(path) })
 			}, func() {
 				welcome.dismiss(func() {
@@ -103,7 +103,8 @@ func (app *workspaceWindow) closeWelcomeIfFocused() bool {
 
 // The native AX window is 660 × 692 pt. The list scrolls independently of
 // the fixed header and actions.
-func drawWelcomeContent(c *mygoui.Context, blackout bool, documents []workspaceWelcomeDocument, openDocument func(string), newDocument, continueToWorkspace func()) {
+func drawWelcomeContent(c *mygoui.Context, language workspaceLanguage, blackout bool, documents []workspaceWelcomeDocument,
+	openDocument func(string), newDocument, continueToWorkspace func()) {
 	theme := c.Theme()
 	background, titleInk, secondaryInk := theme.Background, theme.Text, theme.TextMuted
 	footerInk, actionFill := theme.TextMuted.Alpha(.65), theme.Surface
@@ -125,16 +126,18 @@ func drawWelcomeContent(c *mygoui.Context, blackout bool, documents []workspaceW
 				})
 			})
 			mygoui.Column(c).Gap(2).Children(func() {
-				mygoui.Text(c, "Welcome Back").FontSize(20).FixedLineHeight(26).Bold().TextColor(titleInk)
-				mygoui.Text(c, "The markdown editor of the future").FontSize(12).FixedLineHeight(15).TextColor(secondaryInk)
+				mygoui.Text(c, language.text("Welcome Back", "欢迎回来")).FontSize(20).FixedLineHeight(26).Bold().TextColor(titleInk)
+				mygoui.Text(c, language.text("The markdown editor of the future", "面向未来的 Markdown 编辑器")).
+					FontSize(12).FixedLineHeight(15).TextColor(secondaryInk)
 			})
 		})
-		mygoui.Scroll(c.Key("Welcome recent documents")).FillWidth().Grow(1).MinHeight(0).Label("Recent Documents").Children(func() {
+		mygoui.Scroll(c.Key("Welcome recent documents")).FillWidth().Grow(1).MinHeight(0).
+			Label(language.text("Recent Documents", "最近文档")).Children(func() {
 			if len(documents) == 0 {
 				return
 			}
 			mygoui.Column(c).FillWidth().Padding(12, 16, 0).Gap(2).Children(func() {
-				mygoui.Text(c, "RECENT DOCUMENTS").FontSize(12).FixedLineHeight(16).FontWeight(700).
+				mygoui.Text(c, language.text("RECENT DOCUMENTS", "最近文档")).FontSize(12).FixedLineHeight(16).FontWeight(700).
 					TextColor(secondaryInk).Margin(0, 8, 6)
 				for _, document := range documents {
 					drawWelcomeDocument(c, document, titleInk, secondaryInk, accent, openDocument)
@@ -143,20 +146,22 @@ func drawWelcomeContent(c *mygoui.Context, blackout bool, documents []workspaceW
 		})
 		mygoui.Row(c).FillWidth().Height(43).Shrink(0).Margin(12, 0, 0).Padding(0, 24).Gap(12).Children(func() {
 			for _, action := range [...]struct {
-				label     string
-				fill, ink mygoui.Color
-				click     func()
+				label, chinese string
+				fill, ink      mygoui.Color
+				click          func()
 			}{
-				{"New Document", actionFill, secondaryInk, newDocument},
-				{"Continue", primaryFill, primaryInk, continueToWorkspace},
+				{"New Document", "新建文档", actionFill, secondaryInk, newDocument},
+				{"Continue", "继续", primaryFill, primaryInk, continueToWorkspace},
 			} {
+				label := language.text(action.label, action.chinese)
 				mygoui.ButtonBase(c.Key(action.label)).Grow(1).MinWidth(0).FillHeight().Radius(8).
-					Background(action.fill).Label(action.label).OnClick(action.click).Children(func() {
-					mygoui.Text(c, action.label).FontSize(12).FontWeight(600).TextColor(action.ink).Role(mygoui.RoleNone)
+					Background(action.fill).Label(label).OnClick(action.click).Children(func() {
+					mygoui.Text(c, label).FontSize(12).FontWeight(600).TextColor(action.ink).Role(mygoui.RoleNone)
 				})
 			}
 		})
-		mygoui.Text(c, "Help > Show Welcome  ·  Help > What's New").Height(13).Shrink(0).FontSize(10).FixedLineHeight(13).
+		mygoui.Text(c, language.text("Help > Show Welcome  ·  Help > What's New", "帮助 > 显示欢迎页  ·  帮助 > 更新内容")).
+			Height(13).Shrink(0).FontSize(10).FixedLineHeight(13).
 			TextColor(footerInk).AlignSelf(mygoui.Center).Margin(12, 0)
 	})
 }

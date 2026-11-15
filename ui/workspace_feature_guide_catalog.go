@@ -15,14 +15,19 @@ type featureGuideCard struct {
 }
 
 type featureGuideSection struct {
-	title string
-	cards []featureGuideCard
+	title, titleChinese string
+	cards               []featureGuideCard
+}
+
+type featureGuideCopy struct {
+	title, summary string
+	hints, points  []string
 }
 
 // EV-UI-122/123 establish the order, titles and preview slots. Examples
 // and instructions are written for this implementation.
 var featureGuideSections = []featureGuideSection{
-	{"Markdown", []featureGuideCard{
+	{"Markdown", "Markdown", []featureGuideCard{
 		{id: "headings", title: "Headings", summary: "Use headings to organize sections, build the outline, and generate a table of contents.",
 			source: "# Field Notes\n## Observations\n### Follow-up", preview: 220,
 			hints: []string{"⌘ ⌃ 1 / 2 / 3", "Insert → Headings", "# Section title"}},
@@ -80,7 +85,7 @@ var featureGuideSections = []featureGuideSection{
 			source: "<span style=\"color: #56a5eb\">Water level rising</span>", preview: 220,
 			hints: []string{"Use a span to style a phrase", "Use a div for a block", "Preview HTML to check the result"}, keywords: "color html style"},
 	}},
-	{"Custom Commands", []featureGuideCard{
+	{"Custom Commands", "自定义命令", []featureGuideCard{
 		{id: "pagebreak", title: "Page Break", summary: "Start a new page in PDF and Word exports at a standalone page break.",
 			source: "[pagebreak]", hints: []string{"Insert → Page Break", "GLOW → /page-break"},
 			points: []string{"Place the marker on a line of its own. The outline and table of contents keep using the document headings."}},
@@ -103,7 +108,7 @@ var featureGuideSections = []featureGuideSection{
 			hints:  []string{"![[Vault path]]", "Insert → Image", "Use a relative filename"},
 			points: []string{"Use Markdown Preview to check Vault images and included note text."}},
 	}},
-	{"Present & Export", []featureGuideCard{
+	{"Present & Export", "演示与导出", []featureGuideCard{
 		{id: "export", title: "Export - PDF, DOCX & HTML", summary: "Export the current draft and choose a format, paper settings, and destination.",
 			hints:  []string{"⌘ E → Quick Export PDF", "⌘ ⇧ E → Export options", "Preview toolbar → Share"},
 			points: []string{"PDF can include a page range and the current theme. Word preserves headings, paragraphs, and lists.", "HTML can contain Mermaid diagrams, with a background set in the document theme."}},
@@ -129,7 +134,7 @@ var featureGuideSections = []featureGuideSection{
 			hints:  []string{"⌘ ⇧ F", "Titlebar → Focus"},
 			points: []string{"Use the same shortcut or the exit control to restore the editing toolbar."}},
 	}},
-	{"Vault", []featureGuideCard{
+	{"Vault", "知识库", []featureGuideCard{
 		{id: "terminal", title: "GLOW Terminal", summary: "Use local commands to inspect the Vault and invoke editor actions.",
 			source: "pwd\nls\n/features", hints: []string{"Bottom bar → GLOW Terminal", "⌃ `", "Enter / to list app commands"},
 			keywords: "terminal console shell cli command line plato prompt ai apply plan grep pipe redirect drawer shade quake glow", illustration: "glow",
@@ -166,7 +171,7 @@ var featureGuideSections = []featureGuideSection{
 			hints:  []string{"⌘ ⇧ O", "View → Toggle Outline"},
 			points: []string{"Select a heading in the outline to reveal its position in the current document."}},
 	}},
-	{"Editor", []featureGuideCard{
+	{"Editor", "编辑器", []featureGuideCard{
 		{id: "smartpaste", title: "Smart Paste", summary: "Paste plain text or formatted material, then check the Markdown the editor produced.",
 			hints:    []string{"⌘ V", "Switch to WYSIWYG for rich clipboard text", "Review the source after pasting"},
 			points:   []string{"For tables, use the table editor when the clipboard format needs correction."},
@@ -186,7 +191,7 @@ var featureGuideSections = []featureGuideSection{
 			hints: []string{"File → New from Template", "⌘ / → Templates", "File → Save as Template…"}, illustration: "templates",
 			points: []string{"The File menu opens a draft. Choosing a template in the command palette inserts it at the current selection."}},
 	}},
-	{"UI & AI", []featureGuideCard{
+	{"UI & AI", "界面与 AI", []featureGuideCard{
 		{id: "palette", title: "Command Palette", summary: "Search available actions from the keyboard and run the selected command.",
 			hints: []string{"⌘ /", "Type a command, then press Return"}, illustration: "palette",
 			points: []string{"Move with the arrow keys to review matches. Escape closes the panel and returns to the editor."}},
@@ -215,8 +220,19 @@ var featureGuideCards = func() map[string]*featureGuideCard {
 }()
 
 func (card *featureGuideCard) searchableText() string {
+	chinese := card.localizedCopy(languageChinese)
 	return strings.ToLower(strings.Join([]string{
 		card.title, card.summary, card.source, strings.Join(card.points, " "),
 		strings.Join(card.hints, " "), card.keywords,
+		chinese.title, chinese.summary, strings.Join(chinese.points, " "), strings.Join(chinese.hints, " "),
 	}, " "))
+}
+
+func (card *featureGuideCard) localizedCopy(language workspaceLanguage) featureGuideCopy {
+	if language == languageChinese {
+		if copy, ok := featureGuideChineseCopy[card.id]; ok {
+			return copy
+		}
+	}
+	return featureGuideCopy{title: card.title, summary: card.summary, hints: card.hints, points: card.points}
 }

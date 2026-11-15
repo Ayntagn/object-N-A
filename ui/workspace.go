@@ -30,6 +30,7 @@ type workspaceWindow struct {
 	moveTabMenu         *mygo.MenuItem
 	settings            *mygo.Window
 	settingsTab         string
+	shortcutsSheet      *mygo.Window
 	preferences         *workspacePreferences
 	blackout            bool
 	vault               *workspace.Vault

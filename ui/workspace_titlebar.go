@@ -129,10 +129,10 @@ func (app *workspaceWindow) toolbar(c *mygoui.Context) {
 			app.titleButton(c, "square.and.arrow.up", "Export", 36, app.showExport).
 				Disabled(app.draft == nil || app.modalOpen || !app.permitsActiveDocument())
 			app.titleDivider(c, spacing)
-			app.titleButton(c, "questionmark.circle", "Help", 36, app.showFeatureGuide).KeepFocus()
-			app.titleButton(c, "keyboard", "Keyboard Shortcuts", keyboardWidth, app.showShortcuts).KeepFocus()
+			app.titleButton(c, "questionmark.circle", app.tr("Help", "帮助"), 36, app.showFeatureGuide).KeepFocus()
+			app.titleButton(c, "keyboard", app.tr("Keyboard Shortcuts", "键盘快捷键"), keyboardWidth, app.showShortcuts).KeepFocus()
 			if settingsVisible {
-				app.titleButton(c, "gearshape", "Settings", settingsWidth, app.showSettings)
+				app.titleButton(c, "gearshape", app.tr("Settings", "设置"), settingsWidth, app.showSettings)
 			}
 			if trailingVisible {
 				app.titleButton(c, "eyeglasses", "Focus", 45, app.toggleFocus).Disabled(app.draft == nil || app.modalOpen)
@@ -140,7 +140,7 @@ func (app *workspaceWindow) toolbar(c *mygoui.Context) {
 			} else {
 				mygoui.Row(c).Width(11).Height(1).Shrink(0)
 				chromeMenu(c, "ellipsis", "more toolbar items", func(m *mygoui.Menu) {
-					if !settingsVisible && m.Item("Settings").Disabled(app.modalOpen).Chosen() {
+					if !settingsVisible && m.Item(app.tr("Settings", "设置")).Disabled(app.modalOpen).Chosen() {
 						app.showSettings()
 					}
 					if m.Item("Focus").Disabled(app.draft == nil || app.modalOpen).Chosen() {
@@ -302,7 +302,7 @@ func (app *workspaceWindow) showSettings() {
 		app.prepareAIConnectionSettings()
 	}
 	app.settings = mygo.NewWindow(mygo.WindowOptions{
-		Title: applicationName + " Settings", Width: 880, Height: 892, MinWidth: 500, MinHeight: 300,
+		Title: app.settingsWindowTitle(), Width: 880, Height: 892, MinWidth: 500, MinHeight: 300,
 		Parent: app.win, DisableMinimize: true, DisableMaximize: true, Vibrancy: workspaceVibrancy(),
 		Content: mygoui.View(app.appearanceSettings),
 	})
@@ -329,18 +329,19 @@ func (app *workspaceWindow) appearanceSettings(c *mygoui.Context) {
 	host.Children(func() {
 		mygoui.Column(c).Width(168).Shrink(0).Padding(16, 12).Gap(4).
 			Background(workspaceChromeSurface(c)).Children(func() {
-			mygoui.Text(c, "Settings").FontSize(17).Bold().Role(mygoui.RoleHeading).
+			mygoui.Text(c, app.tr("Settings", "设置")).FontSize(17).Bold().Role(mygoui.RoleHeading).
 				Height(24).Padding(0, 8).Margin(0, 0, 6)
-			for _, page := range []struct{ label, icon string }{
-				{"General", "gearshape"}, {"Themes", "swatchpalette"}, {"Export", "square.and.arrow.up"},
-				{"AI", "sparkles"}, {"API", "network"}, {"Shortcuts", "keyboard"},
+			for _, page := range []struct{ id, chinese, icon string }{
+				{"General", "通用", "gearshape"}, {"Themes", "主题", "swatchpalette"}, {"Export", "导出", "square.and.arrow.up"},
+				{"AI", "AI", "sparkles"}, {"API", "API", "network"}, {"Shortcuts", "快捷输入", "keyboard"},
 			} {
-				active := app.settingsTab == page.label
-				item := mygoui.ButtonBase(c.Key(page.label)).Label(page.label).AccessSelected(active).Height(36).
+				label := app.tr(page.id, page.chinese)
+				active := app.settingsTab == page.id
+				item := mygoui.ButtonBase(c.Key(page.id)).Label(label).AccessSelected(active).Height(36).
 					FillWidth().AlignItems(mygoui.Center).Justify(mygoui.Start).Gap(12).Padding(0, 14).Radius(7).
 					OnClick(func() {
-						app.settingsTab = page.label
-						if page.label == "AI" {
+						app.settingsTab = page.id
+						if page.id == "AI" {
 							app.prepareAIConnectionSettings()
 						}
 					})
@@ -358,7 +359,7 @@ func (app *workspaceWindow) appearanceSettings(c *mygoui.Context) {
 							Background(ink).Role(mygoui.RoleNone)
 					}
 					chromeIconColor(c, page.icon, 16, ink)
-					mygoui.Text(c, page.label).FontSize(13).FontWeight(600).TextColor(ink)
+					mygoui.Text(c, label).FontSize(13).FontWeight(600).TextColor(ink)
 				})
 			}
 		})

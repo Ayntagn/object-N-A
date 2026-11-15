@@ -15,6 +15,7 @@ import (
 )
 
 type workspacePreferences struct {
+	InterfaceLanguage         workspaceLanguage           `json:"interfaceLanguage,omitempty"`
 	Appearance                workspaceAppearance         `json:"appAppearance"`
 	PreviewThemeID            string                      `json:"selectedThemeId"`
 	UserStylesheetEnabled     bool                        `json:"userStylesheetEnabled,omitempty"`

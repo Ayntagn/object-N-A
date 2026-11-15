@@ -594,7 +594,7 @@ func (app *workspaceWindow) buildMenu() {
 	app.menu = mygo.NewMenu([]*mygo.MenuItem{
 		{Role: mygo.RoleAppMenu, Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleAbout},
-			{Label: "Settings…", Accelerator: "CmdOrCtrl+,", Click: command(app.showSettings)},
+			{Label: app.tr("Settings…", "设置…"), Accelerator: "CmdOrCtrl+,", Click: command(app.showSettings)},
 			mygo.Separator(), {Role: mygo.RoleServices},
 			mygo.Separator(), {Role: mygo.RoleHide}, {Role: mygo.RoleHideOthers}, {Role: mygo.RoleUnhide},
 			mygo.Separator(), {Role: mygo.RoleQuit},
@@ -695,10 +695,10 @@ func (app *workspaceWindow) buildMenu() {
 			app.moveTabMenu,
 			mygo.Separator(), {Role: mygo.RoleFront},
 		}},
-		{Label: "Help", Submenu: []*mygo.MenuItem{
-			{Label: applicationName + " Help", Click: command(app.showFeatureGuide)},
-			{Label: "Keyboard Shortcuts", Accelerator: "CmdOrCtrl+Shift+/", Click: command(app.showShortcuts)},
-			{Label: "Show Welcome", Click: command(app.showWelcome)},
+		{Label: app.tr("Help", "帮助"), Submenu: []*mygo.MenuItem{
+			{Label: applicationName + " " + app.tr("Help", "帮助"), Click: command(app.showFeatureGuide)},
+			{Label: app.tr("Keyboard Shortcuts", "键盘快捷键"), Accelerator: "CmdOrCtrl+Shift+/", Click: command(app.showShortcuts)},
+			{Label: app.tr("Show Welcome", "显示欢迎页"), Click: command(app.showWelcome)},
 		}},
 	})
 	app.win.SetMenu(app.menu)

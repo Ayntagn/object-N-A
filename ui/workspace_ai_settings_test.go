@@ -26,7 +26,7 @@ func TestAIConnectionForm(t *testing.T) {
 		}
 	}
 	tester := mygoui.NewTester(func(c *mygoui.Context) {
-		form.draw(c, action("Refresh"), action("Test"), action("Save"))
+		form.draw(c, languageEnglish, action("Refresh"), action("Test"), action("Save"))
 	}, 632, 320)
 	control := func(role mygoui.Role, label string) mygoui.AccessInfo {
 		t.Helper()

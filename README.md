@@ -95,6 +95,10 @@ sh packaging/install-linux.sh dist/object-n-a
 
 把示例路径换成已有的笔记目录。启动时省略 `-vault`，可在工作区点击 `Open Vault` 或 `Create Vault`。从系统启动器进入应用后，也可从应用内选择文件。
 
+## 切换设置与帮助语言
+
+在 **Settings → General → Settings & Help Language** 点击 **简体中文**。设置页、帮助菜单、功能指南、键盘快捷键和欢迎页会即时切换。回到 **设置 → 通用 → 设置与帮助语言** 点击 **English** 可切回英文。语言选择会在重启后保留。
+
 ## 验证范围
 
 v0.1.0 在 Apple silicon 本机构建，校验了 Bundle 签名，并从 Bundle 执行 `-version`。Windows 和 Linux 的 amd64 交叉编译通过，Linux 的安装文件及 `.desktop` 命令在隔离目录验证。Windows 开始菜单和 Linux 桌面启动仍待对应平台实机验证。

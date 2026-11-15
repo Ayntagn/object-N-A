@@ -96,19 +96,23 @@ func (app *workspaceWindow) editorFontSizeMenu(m *mygoui.Menu) {
 
 func (app *workspaceWindow) editorFontLabel() string {
 	if app.preferences.EditorFont == "" {
-		return systemMonoLabel
+		return app.tr(systemMonoLabel, "系统等宽字体")
 	}
 	return app.preferences.EditorFont
 }
 
 func (app *workspaceWindow) editorFontMenu(m *mygoui.Menu) {
+	app.editorFontMenuWithSystem(m, systemMonoLabel)
+}
+
+func (app *workspaceWindow) editorFontMenuWithSystem(m *mygoui.Menu, systemLabel string) {
 	choose := func(label, family string) {
 		if m.Item(label).Checked(app.preferences.EditorFont == family).Chosen() {
 			app.preferences.EditorFont = family
 			app.preferencesChanged()
 		}
 	}
-	choose(systemMonoLabel, "")
+	choose(systemLabel, "")
 	for i := range sourceFontChoices {
 		name := sourceFontChoices[i].name
 		choose(name, name)

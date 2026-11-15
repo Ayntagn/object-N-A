@@ -5,6 +5,8 @@ package ui
 import (
 	"slices"
 	"testing"
+
+	mygoui "github.com/egoist/mygo/ui"
 )
 
 func TestFeatureGuideSearch(t *testing.T) {
@@ -41,5 +43,60 @@ func TestFeatureGuideSearch(t *testing.T) {
 	guide.move(1)
 	if len(guide.matches) != 0 || guide.selected != "mermaid-bg" {
 		t.Fatalf("empty search should keep detail, got %v and %q", guide.matches, guide.selected)
+	}
+}
+
+func TestHelpViewsUseSelectedLanguage(t *testing.T) {
+	t.Setenv("CYBERWRITER_CONFIG_DIR", t.TempDir())
+	app := &workspaceWindow{preferences: &workspacePreferences{}}
+	guide := workspaceFeatureGuide{workspace: app}
+	guide.search("")
+	features := mygoui.NewTester(guide.draw, featureGuideWidth, featureGuideHeight)
+	if err := features.Click("Search features"); err != nil {
+		t.Fatal(err)
+	}
+	features.Type("知识图谱 wikilinks")
+	if !slices.Equal(guide.matches, []string{"graph"}) || guide.selected != "graph" {
+		t.Fatalf("mixed search matches %v, selection %q", guide.matches, guide.selected)
+	}
+	shortcuts := mygoui.NewTester(func(c *mygoui.Context) {
+		app.shortcutSheetView(c, func() {})
+	}, 340, 700)
+	const document = "Field Notes, /Notes"
+	welcome := mygoui.NewTester(func(c *mygoui.Context) {
+		drawWelcomeContent(c, app.interfaceLanguage(), false,
+			[]workspaceWelcomeDocument{{Path: "Field Notes.md", Title: "Field Notes", Folder: "/Notes"}},
+			func(string) {}, func() {}, func() {})
+	}, welcomeWidth, welcomeHeight)
+	ai := mygoui.NewTester(func(c *mygoui.Context) {
+		drawAIWorkspaceGuidePopover(c, app.interfaceLanguage(), false)
+	}, aiWorkspaceGuideWidth, aiWorkspaceGuideHeight)
+	for _, state := range []struct {
+		language                 workspaceLanguage
+		feature, keys, hello, ai string
+	}{
+		{languageChinese, "知识图谱", "键盘快捷键", "欢迎回来", "AI 工作区指南"},
+		{languageEnglish, "Knowledge Graph", "Keyboard Shortcuts", "Welcome Back", "AI Workspace Guide"},
+	} {
+		if err := app.setInterfaceLanguage(state.language); err != nil {
+			t.Fatal(err)
+		}
+		for _, view := range []struct {
+			tester *mygoui.Tester
+			name   string
+		}{
+			{features, state.feature}, {shortcuts, state.keys}, {welcome, state.hello}, {ai, state.ai},
+		} {
+			view.tester.Frame()
+			if _, ok := view.tester.Access(view.name); !ok {
+				t.Fatalf("%s: missing %q after switching an open view", state.language, view.name)
+			}
+		}
+		if guide.query != "知识图谱 wikilinks" || guide.selected != "graph" {
+			t.Fatal("changing language reset the guide search or selected topic")
+		}
+		if _, ok := welcome.AccessByRole(mygoui.RoleButton, document); !ok {
+			t.Fatal("changing language changed a user document label")
+		}
 	}
 }

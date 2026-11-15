@@ -1,16 +1,23 @@
 package ui
 
-import mygoui "github.com/egoist/mygo/ui"
+import (
+	"strings"
+
+	mygoui "github.com/egoist/mygo/ui"
+)
 
 // EV-UI-022 / EV-UI-247. The typography, paper settings, Word note and location form four sections.
 func (app *workspaceWindow) exportSettings(c *mygoui.Context) {
 	prefs := &app.preferences.Export
+	tr := app.tr
 	spacing := exportSpacingOptions[prefs.spacingIndex()]
-	spacingDetail := spacing
+	spacingLabel, spacingDetail := spacing, spacing
 	if spacing == exportSpacingOptions[0] {
-		spacingDetail = "Use each theme's default"
+		spacingLabel = tr(spacing, "主题默认")
+		spacingDetail = tr("Use each theme's default", "使用各主题的默认行距")
 	}
 	paper, _ := findExportPaper(prefs.Paper)
+	paperDescription := app.exportPaperDescription(paper)
 	numberPages := !prefs.OmitPageNumbers
 	theme := *c.Theme()
 	if app.blackout && !c.Preferences().HighContrast {
@@ -19,11 +26,15 @@ func (app *workspaceWindow) exportSettings(c *mygoui.Context) {
 	}
 	// The shared card adds one point of border on either side of its content.
 	mygoui.Themed(c, &theme).FillWidth().Gap(20).Children(func() {
-		app.settingsSection(c, "Preview & Export Typography", "text.alignleft", func() {
+		app.settingsSection(c, tr("Preview & Export Typography", "预览和导出的排版"), "text.alignleft", func() {
 			app.settingsCard(c).Padding(0, 15).Children(func() {
-				app.exportSettingsMenu(c, "Line Spacing", spacing, spacingDetail, "arrow.up.and.down.text.horizontal", 78, func(menu *mygoui.Menu) {
+				app.exportSettingsMenu(c, tr("Line Spacing", "行距"), spacingLabel, spacingDetail, "arrow.up.and.down.text.horizontal", 78, func(menu *mygoui.Menu) {
 					for _, choice := range exportSpacingOptions {
-						if menu.Item(choice).Radio(spacing == choice).Chosen() {
+						label := choice
+						if choice == exportSpacingOptions[0] {
+							label = tr(choice, "主题默认")
+						}
+						if menu.Item(label).Radio(spacing == choice).Chosen() {
 							prefs.LineSpacing = choice
 							app.preferencesChanged()
 						}
@@ -31,12 +42,12 @@ func (app *workspaceWindow) exportSettings(c *mygoui.Context) {
 				})
 			})
 		})
-		app.settingsSection(c, "PDF Export", "doc.fill", func() {
+		app.settingsSection(c, tr("PDF Export", "PDF 导出"), "doc.fill", func() {
 			app.settingsCard(c).Padding(0, 15).Children(func() {
-				app.exportSettingsMenu(c, "Paper Size", paper.description, paper.description, "doc.plaintext", 79, func(menu *mygoui.Menu) {
+				app.exportSettingsMenu(c, tr("Paper Size", "纸张大小"), paperDescription, paperDescription, "doc.plaintext", 79, func(menu *mygoui.Menu) {
 					for _, group := range exportPapers {
 						for _, choice := range group.papers {
-							if menu.Item(choice.label).Radio(paper.label == choice.label).Chosen() {
+							if menu.Item(app.exportPaperLabel(choice)).Radio(paper.label == choice.label).Chosen() {
 								prefs.Paper = choice.label
 								app.writePreferences()
 							}
@@ -46,14 +57,14 @@ func (app *workspaceWindow) exportSettings(c *mygoui.Context) {
 				mygoui.Divider(c).Height(1)
 				app.exportSettingsOrientation(c)
 				mygoui.Divider(c).Height(1)
-				app.settingsSwitchOnChange(c, "Page Numbers", "Include page numbers in footer", "number", 79, &numberPages, func() {
+				app.settingsSwitchOnChange(c, tr("Page Numbers", "页码"), tr("Include page numbers in footer", "在页脚显示页码"), "number", 79, &numberPages, func() {
 					prefs.OmitPageNumbers = !numberPages
 					app.preferencesChanged()
 				})
 			})
 		})
 		mygoui.Column(c).FillWidth().PaddingX(23.5).Children(func() {
-			app.settingsSection(c, "Word Export", "doc.text.fill", func() {
+			app.settingsSection(c, tr("Word Export", "Word 导出"), "doc.text.fill", func() {
 				app.settingsCard(c).Padding(15).Children(func() {
 					mygoui.Row(c).FillWidth().MinHeight(30).Gap(15).AlignItems(mygoui.Center).Children(func() {
 						infoInk := c.Theme().Accent
@@ -63,15 +74,16 @@ func (app *workspaceWindow) exportSettings(c *mygoui.Context) {
 						mygoui.Box(c).Size(16, 16).Center().Children(func() {
 							chromeIconColor(c, "info.circle", 21, infoInk)
 						})
-						mygoui.Text(c, "Word documents (.docx) are exported with standard formatting optimized for Microsoft Word and compatible applications.").
+						mygoui.Text(c, tr("Word documents (.docx) are exported with standard formatting optimized for Microsoft Word and compatible applications.",
+							"Word 文档（.docx）使用适合 Microsoft Word 及兼容应用的标准格式导出。")).
 							FontSize(12).Grow(1).MinWidth(0).TextColor(c.Theme().TextMuted)
 					})
 				})
 			})
 		})
-		app.settingsSection(c, "File Location", "folder", func() {
+		app.settingsSection(c, tr("File Location", "文件位置"), "folder", func() {
 			app.settingsCard(c).Padding(0, 15).Children(func() {
-				app.settingsSwitchOnChange(c, "Remember Location", "Use last export folder as default", "clock.arrow.circlepath", 78, &prefs.RememberLocation, func() {
+				app.settingsSwitchOnChange(c, tr("Remember Location", "记住位置"), tr("Use last export folder as default", "默认使用上次导出的文件夹"), "clock.arrow.circlepath", 78, &prefs.RememberLocation, func() {
 					if !prefs.RememberLocation {
 						prefs.LastDirectory = ""
 					}
@@ -80,6 +92,35 @@ func (app *workspaceWindow) exportSettings(c *mygoui.Context) {
 			})
 		})
 	})
+}
+
+func (app *workspaceWindow) exportPaperLabel(paper exportPaper) string {
+	switch paper.label {
+	case "Letter":
+		return app.tr(paper.label, "美式信纸")
+	case "Legal":
+		return app.tr(paper.label, "美式法律用纸")
+	case "Tabloid":
+		return app.tr(paper.label, "小报用纸")
+	case "Executive":
+		return app.tr(paper.label, "行政用纸")
+	case "Statement":
+		return app.tr(paper.label, "对账单用纸")
+	case "Folio":
+		return app.tr(paper.label, "对开纸")
+	}
+	return paper.label
+}
+
+func (app *workspaceWindow) exportPaperDescription(paper exportPaper) string {
+	_, size, ok := strings.Cut(paper.description, " (")
+	if !ok {
+		return paper.description
+	}
+	size = strings.TrimSuffix(size, ")")
+	size = strings.ReplaceAll(size, " in", " 英寸")
+	size = strings.ReplaceAll(size, " mm", " 毫米")
+	return app.tr(paper.description, app.exportPaperLabel(paper)+"（"+size+"）")
 }
 
 func (app *workspaceWindow) exportSettingsMenu(c *mygoui.Context, title, value, detail, symbol string, height float32, build func(*mygoui.Menu)) {
@@ -105,12 +146,13 @@ func (app *workspaceWindow) exportSettingsMenu(c *mygoui.Context, title, value, 
 
 func (app *workspaceWindow) exportSettingsOrientation(c *mygoui.Context) {
 	prefs := &app.preferences.Export
-	labels := [...]string{"Portrait", "Landscape"}
+	title := app.tr("Orientation", "页面方向")
+	labels := [...]string{app.tr("Portrait", "纵向"), app.tr("Landscape", "横向")}
 	selected := 0
 	if prefs.Landscape {
 		selected = 1
 	}
-	settingsRow(c, "Orientation", labels[selected], "rectangle.portrait.arrowtriangle.2.outward", 80, func() {
+	settingsRow(c, title, labels[selected], "rectangle.portrait.arrowtriangle.2.outward", 80, func() {
 		theme := c.Theme()
 		trackFill, selectedFill, selectedInk := theme.SurfaceHover, theme.Accent, theme.AccentText
 		if app.blackout && !c.Preferences().HighContrast {
@@ -120,7 +162,7 @@ func (app *workspaceWindow) exportSettingsOrientation(c *mygoui.Context) {
 			}
 		}
 		parts := mygoui.SegmentedBase(c, &selected, len(labels))
-		parts.Track.Label("Orientation").Size(181, 24).MinWidth(128).Shrink(1).Radius(6).Background(trackFill).
+		parts.Track.Label(title).Size(181, 24).MinWidth(128).Shrink(1).Radius(6).Background(trackFill).
 			OnChange(func() {
 				prefs.Landscape = selected == 1
 				app.writePreferences()

@@ -42,6 +42,8 @@ func (draft *markdownSnippetsDraft) report(err error) {
 
 func (app *workspaceWindow) drawMarkdownShortcutsSettings(c *mygoui.Context) {
 	current := app.preferences.MarkdownShortcuts
+	tr := app.tr
+	snippets := tr("Snippets", "代码片段")
 	// Keep the draft for the life of this Settings window, including page switches.
 	draft := mygoui.Local(c.Root(), "Markdown snippet draft", func() markdownSnippetsDraft {
 		return newMarkdownSnippetsDraft(current)
@@ -50,20 +52,20 @@ func (app *workspaceWindow) drawMarkdownShortcutsSettings(c *mygoui.Context) {
 		*draft = newMarkdownSnippetsDraft(current)
 	}
 
-	app.settingsSection(c, "Markdown Shortcuts", "keyboard", func() {
+	app.settingsSection(c, tr("Markdown Shortcuts", "Markdown 快捷输入"), "keyboard", func() {
 		app.settingsCard(c.Key("Markdown shortcuts snippets")).Gap(12).Children(func() {
 			enabled := current.Enabled
-			mygoui.Checkbox(c.Key("enable Markdown shortcuts"), &enabled, "Enable Markdown Shortcuts").OnChange(func() {
+			mygoui.Checkbox(c.Key("enable Markdown shortcuts"), &enabled, tr("Enable Markdown Shortcuts", "启用 Markdown 快捷输入")).OnChange(func() {
 				next := app.preferences.MarkdownShortcuts
 				next.Enabled = enabled
 				draft.report(app.saveMarkdownShortcutPreferences(next))
 			})
 			theme := c.Theme()
 			mygoui.Column(c).FillWidth().Gap(4).Children(func() {
-				mygoui.Text(c, "Snippets").FontSize(13).FontWeight(600).Role(mygoui.RoleNone)
-				mygoui.Text(c, "Paste or edit a snippets array. Comments are kept.").FontSize(11).TextColor(theme.TextMuted)
+				mygoui.Text(c, snippets).FontSize(13).FontWeight(600).Role(mygoui.RoleNone)
+				mygoui.Text(c, tr("Paste or edit a snippets array. Comments are kept.", "粘贴或编辑片段数组，注释会保留。")).FontSize(11).TextColor(theme.TextMuted)
 			})
-			input := mygoui.TextArea(c.Key("Markdown snippets source"), &draft.text).Label("Snippets").
+			input := mygoui.TextArea(c.Key("Markdown snippets source"), &draft.text).Label(snippets).
 				FillWidth().MinWidth(0).Height(355).Font("monospace").FontSize(13).Padding(10, 12).
 				Placeholder("[]").Radius(6).Background(theme.Background).Border(1, theme.Border).
 				OnChange(func() { draft.report(nil) })
@@ -78,7 +80,9 @@ func (app *workspaceWindow) drawMarkdownShortcutsSettings(c *mygoui.Context) {
 				status, failed := draft.status, draft.problem
 				conflict := !draft.matches(current)
 				if conflict {
-					status, failed = markdownSnippetsConflict, true
+					status, failed = tr(markdownSnippetsConflict, "片段已在另一个设置窗口中修改。"), true
+				} else if status == "Snippets saved" {
+					status = tr(status, "片段已保存")
 				}
 				if status != "" {
 					message := mygoui.Text(c, status).FontSize(11).Grow(1).MinWidth(0).
@@ -90,12 +94,12 @@ func (app *workspaceWindow) drawMarkdownShortcutsSettings(c *mygoui.Context) {
 					mygoui.Spacer(c)
 				}
 				if conflict {
-					mygoui.Button(c, "Load Saved Snippets").Shrink(0).KeepFocus().
-						Tooltip("Replace this draft with the saved snippets").OnClick(func() {
+					mygoui.Button(c, tr("Load Saved Snippets", "载入已保存的片段")).Shrink(0).KeepFocus().
+						Tooltip(tr("Replace this draft with the saved snippets", "用已保存的片段替换此草稿")).OnClick(func() {
 						*draft = newMarkdownSnippetsDraft(app.preferences.MarkdownShortcuts)
 					})
 				}
-				mygoui.Button(c, "Save Snippets").Height(28).Shrink(0).KeepFocus().
+				mygoui.Button(c, tr("Save Snippets", "保存片段")).Height(28).Shrink(0).KeepFocus().
 					Background(theme.Accent).TextColor(theme.AccentText).OnClick(save)
 			})
 		})

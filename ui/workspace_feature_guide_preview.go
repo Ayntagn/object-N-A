@@ -17,7 +17,9 @@ type featureGuidePreview struct {
 	card      *featureGuideCard
 	theme     string
 	customCSS string
+	language  workspaceLanguage
 	revision  uint64
+	document  uint64
 	mermaid   bool
 	vega      bool
 }
@@ -56,12 +58,14 @@ func (preview *featureGuidePreview) init(win *mygo.Window) {
 	page.LoadHTML(featureGuidePage, "")
 }
 
-func (preview *featureGuidePreview) draw(c *mygoui.Context, card *featureGuideCard, customCSS string) {
+func (preview *featureGuidePreview) draw(c *mygoui.Context, card *featureGuideCard, language workspaceLanguage, customCSS string) {
 	themeID := "modern"
 	if c.Theme().Dark {
 		themeID = "synthetic-editorial"
 	}
 	theme, _ := findPreviewTheme(themeID)
+	title := card.localizedCopy(language).title
+	label := title + language.text(" example", "示例")
 	mygoui.Box(c.Key("guide-preview")).FillWidth().Height(card.preview).Shrink(0).
 		Radius(9).Background(mygoui.Hex(theme.BackgroundColor)).Clip().Children(func() {
 		if preview.view == nil || !preview.ready {
@@ -71,16 +75,22 @@ func (preview *featureGuidePreview) draw(c *mygoui.Context, card *featureGuideCa
 			return
 		}
 		page := preview.view.Page()
-		if preview.card != card || preview.theme != themeID || preview.customCSS != customCSS {
+		contentChanged := preview.card != card || preview.theme != themeID || preview.customCSS != customCSS
+		if contentChanged || preview.language != language {
 			preview.revision++
+			document := preview.document
+			if contentChanged {
+				document = preview.revision
+			}
 			body := featureGuideExampleHTML(card)
-			frame := previewFrame{Revision: preview.revision, Document: preview.revision,
-				Title: card.title, Label: card.title + " example", HTML: body, Theme: themeID, CustomCSS: customCSS}
+			frame := previewFrame{Revision: preview.revision, Document: document,
+				Title: title, Label: label, HTML: body, Theme: themeID, CustomCSS: customCSS}
 			if preview.theme != themeID {
 				frame.ThemeFonts = previewThemeFonts(themeID)
 			}
 			if previewChanged.EmitPage(page, frame) == nil {
 				preview.card, preview.theme, preview.customCSS = card, themeID, customCSS
+				preview.language, preview.document = language, document
 				if !preview.mermaid && strings.Contains(body, mermaidBlockStart) {
 					preview.mermaid = true
 					go loadPreviewAsset(page, "Mermaid", mermaidLoader)
@@ -91,7 +101,7 @@ func (preview *featureGuidePreview) draw(c *mygoui.Context, card *featureGuideCa
 				}
 			}
 		}
-		mygoui.WebView(c, preview.view).Fill().PassThrough().Label(card.title + " example")
+		mygoui.WebView(c, preview.view).Fill().PassThrough().Label(label)
 	})
 }
 

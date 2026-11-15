@@ -13,7 +13,8 @@ import (
 // EV-UI-022/247. Vault has its own blue drawing switch and 120 pt file segments.
 func (app *workspaceWindow) drawVaultOpenPreferences(c *mygoui.Context) {
 	prefs := app.preferences
-	const sidebar = "Sidebar Click - Open File"
+	tr := app.tr
+	sidebar := tr("Sidebar Click - Open File", "从侧栏打开文件")
 	selected := 0
 	if prefs.SidebarClickNewWindow {
 		selected = 1
@@ -22,12 +23,14 @@ func (app *workspaceWindow) drawVaultOpenPreferences(c *mygoui.Context) {
 	if runtime.GOOS == "darwin" {
 		modifier = "⌘"
 	}
-	settingsRow(c, sidebar, "Hold "+modifier+" to open in a new window", "rectangle.on.rectangle", 48, func() {
+	description := fmt.Sprintf(tr("Hold %s to open in a new window", "按住 %s 可在新窗口打开"), modifier)
+	settingsRow(c, sidebar, description, "rectangle.on.rectangle", 48, func() {
 		app.vaultOpenSegments(c, sidebar, selected)
 	})
-	const drawings = "Drawings Open Separately"
-	const description = "Drawings open in their own window/tab - and notes opened from a drawing's links do too, so neither ever replaces the other"
-	settingsRow(c, drawings, description, "pencil.and.outline", 48, func() {
+	drawings := tr("Drawings Open Separately", "单独打开绘图")
+	drawingsDetail := tr("Drawings open in their own window/tab - and notes opened from a drawing's links do too, so neither ever replaces the other",
+		"绘图以及从绘图链接打开的笔记会各自在独立的窗口或标签页中打开。")
+	settingsRow(c, drawings, drawingsDetail, "pencil.and.outline", 48, func() {
 		if !app.blackout || c.Preferences().HighContrast {
 			mygoui.Switch(c.Key(drawings), &prefs.DrawingsOpenSeparately).Size(54, 24).Shrink(0).
 				Label(drawings).OnChange(app.preferencesChanged)
@@ -56,7 +59,7 @@ func (app *workspaceWindow) vaultOpenSegments(c *mygoui.Context, label string, s
 	}
 	// The contiguous pair shares the narrower Vault controls' center.
 	mygoui.RadioGroup(c.Key(label), func() {
-		for index, title := range [...]string{"Replace current", "New window"} {
+		for index, title := range [...]string{app.tr("Replace current", "当前窗口"), app.tr("New window", "新窗口")} {
 			button := mygoui.RadioBase(c.Key(title), &selected, index).Height(24).Basis(0).Grow(1).MinWidth(0).
 				Center().Radius(6).Padding(0, 4).Label(title).OnChange(func() {
 				app.preferences.SidebarClickNewWindow = selected == 1

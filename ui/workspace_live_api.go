@@ -387,16 +387,18 @@ func apiHistoryDisplay(address, source, response string) (string, string, string
 }
 
 func (app *workspaceWindow) apiSettings(c *mygoui.Context) {
-	mygoui.Text(c, "API Response Formatting").FontSize(17).Bold().Role(mygoui.RoleHeading)
-	mygoui.Text(c, "Built-in tables (no AI)").FontSize(13)
-	mygoui.Text(c, "Allowed Hosts").FontSize(17).Bold().Role(mygoui.RoleHeading).Margin(16, 0, 0)
+	tr := app.tr
+	mygoui.Text(c, tr("API Response Formatting", "API 响应格式")).FontSize(17).Bold().Role(mygoui.RoleHeading)
+	mygoui.Text(c, tr("Built-in tables (no AI)", "内置表格，无需 AI")).FontSize(13)
+	mygoui.Text(c, tr("Allowed Hosts", "允许访问的主机")).FontSize(17).Bold().Role(mygoui.RoleHeading).Margin(16, 0, 0)
 	if len(app.preferences.APIAllowedHosts) == 0 {
-		mygoui.Text(c, "No hosts allowed yet.").FontSize(13).TextColor(c.Theme().TextMuted)
+		mygoui.Text(c, tr("No hosts allowed yet.", "尚未添加允许访问的主机。")).FontSize(13).TextColor(c.Theme().TextMuted)
 	}
 	for _, host := range app.preferences.APIAllowedHosts {
 		mygoui.Row(c.Key(host)).FillWidth().Gap(8).AlignItems(mygoui.Center).Children(func() {
 			mygoui.Text(c, host).Grow(1).MinWidth(0).Wrap()
-			mygoui.Button(c, "Remove").Label("Remove " + host).OnClick(func() {
+			remove := tr("Remove", "移除")
+			mygoui.Button(c, remove).Label(remove + " " + host).OnClick(func() {
 				app.preferences.APIAllowedHosts = slices.DeleteFunc(app.preferences.APIAllowedHosts, func(value string) bool { return value == host })
 				app.writePreferences()
 			})
