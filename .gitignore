@@ -1,0 +1,7 @@
+.DS_Store
+/dist/
+/ui/fonts/*.ttf.gz
+/ui/webassets/**/*.gz
+/ui/webassets/katex/fonts/*.woff2
+/ui/webassets/katex/katex.min.js
+/ui/webassets/katex/katex.min.css

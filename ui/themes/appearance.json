@@ -1,0 +1,20 @@
+{
+  "cyber": {
+    "background": "#181C22",
+    "sidebar": "#1C2026",
+    "text": "#C4C6D0",
+    "muted": "#8A8DA8",
+    "border": "#45474B",
+    "borderOpacity": 0.45,
+    "accent": "#A9C7FF"
+  },
+  "plato": {
+    "background": "#1A1207",
+    "sidebar": "#1D1409",
+    "text": "#C79A5C",
+    "muted": "#8F6D40",
+    "border": "#4A3319",
+    "borderOpacity": 0.45,
+    "accent": "#FFC46B"
+  }
+}

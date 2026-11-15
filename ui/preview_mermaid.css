@@ -1,0 +1,29 @@
+  pre.mermaid[data-mermaid-state="rendered"] {
+    border: 1px solid var(--mermaid-border);
+    font: inherit;
+    text-align: center;
+    overflow: visible;
+  }
+  pre.mermaid[data-mermaid-transparent] {
+    background: transparent;
+    border: 0;
+    padding: 16px 0;
+  }
+  pre.mermaid > svg { display: block; margin-inline: auto; max-width: 100%; height: auto; }
+  pre.mermaid[data-mermaid-ink] :is(.node.default .nodeLabel, .node.default .nodeLabel p, .node.default text,
+    .edgeLabel text, .cluster-label, .cluster-label p, .pieTitleText, .sectionTitle, .node-labels text) {
+    fill: var(--mermaid-ink) !important;
+    color: var(--mermaid-ink) !important;
+  }
+  pre.mermaid[data-mermaid-ink] :is(.node.default > :is(rect, circle, polygon, path), .cluster rect) {
+    fill: transparent !important;
+    stroke: var(--mermaid-ink) !important;
+  }
+  pre.mermaid[data-mermaid-ink] :is(.edgePath .path, .flowchart-link, .messageLine0, .messageLine1, .relation) {
+    stroke: var(--mermaid-ink) !important;
+  }
+  pre.mermaid[data-mermaid-ink] :is(.arrowheadPath, .marker) {
+    fill: var(--mermaid-ink) !important;
+    stroke: var(--mermaid-ink) !important;
+  }
+  .mermaid-error { display: block; font: 0.85rem system-ui, sans-serif; margin-top: 8px; }

@@ -1,0 +1,45 @@
+[
+  {
+    "name": "vega",
+    "version": "5.33.1",
+    "integrity": "sha512-1fArfVDUqVbb5z8n+/nVQb+VNBzx8svY6CrsyTK4Ujm4yrd9I1auoKxBAPXLCavY1LcrbHUskQbGUP8gXOzyQw==",
+    "tarball": "https://registry.npmjs.org/vega/-/vega-5.33.1.tgz",
+    "sha256": "463f3db6a40b20e9747b4ed38f37ed0add508838f9141b1cf8366784b07b30c8",
+    "csp": "sha256-Rj89tqQLIOl0e07TjzftCt1QiDj5FBsc+DZnhLB7MMg=",
+    "bytes": 515242,
+    "gzip_bytes": 177786,
+    "original_package_bytes_match": true
+  },
+  {
+    "name": "vega-lite",
+    "version": "5.23.0",
+    "integrity": "sha512-l4J6+AWE3DIjvovEoHl2LdtCUkfm4zs8Xxx7INwZEAv+XVb6kR6vIN1gt3t2gN2gs/y4DYTs/RPoTeYAuEg6mA==",
+    "tarball": "https://registry.npmjs.org/vega-lite/-/vega-lite-5.23.0.tgz",
+    "sha256": "58c27358e26f2d319cf62f45bc17a4c8362f08645001df2ec8d341eee4097c7f",
+    "csp": "sha256-WMJzWOJvLTGc9i9FvBekyDYvCGRQAd8uyNNB7uQJfH8=",
+    "bytes": 252198,
+    "gzip_bytes": 79242,
+    "original_package_bytes_match": true
+  },
+  {
+    "name": "vega-embed",
+    "version": "6.29.0",
+    "integrity": "sha512-PmlshTLtLFLgWtF/b23T1OwX53AugJ9RZ3qPE2c01VFAbgt3/GSNI/etzA/GzdrkceXFma+FDHNXUppKuM0U6Q==",
+    "tarball": "https://registry.npmjs.org/vega-embed/-/vega-embed-6.29.0.tgz",
+    "sha256": "12d02acfbe3ec59ef9a37dd4822a2e04e2961b5bbb671bbe661d2221715b99da",
+    "csp": "sha256-EtAqz74+xZ75o33UgiouBOKWG1u7Zxu+Zh0iIXFbmdo=",
+    "bytes": 60630,
+    "gzip_bytes": 20910,
+    "original_package_bytes_match": true
+  },
+  {
+    "name": "d3-dsv",
+    "version": "3.0.1",
+    "integrity": "sha512-UG6OvdI5afDIFP9w4G0mNq50dSOsXHJaRE8arAS5o9ApWnIElp8GZw1Dun8vP8OyHOZ/QJUKUJwxiiCCnUwm+Q==",
+    "tarball": "https://registry.npmjs.org/d3-dsv/-/d3-dsv-3.0.1.tgz",
+    "sha256": "22bcd87366b79d391fbe0032a309bf58a98819d54230271c70fb73f98db2e952",
+    "csp": "sha256-IrzYc2a3nTkfvgAyowm/WKmIGdVCMCcccPtz+Y2y6VI=",
+    "bytes": 3401,
+    "gzip_bytes": 1535
+  }
+]

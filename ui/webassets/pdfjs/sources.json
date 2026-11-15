@@ -1,0 +1,22 @@
+{
+  "package": "pdfjs-dist",
+  "version": "6.5.438",
+  "integrity": "sha512-vg8Pw1x+AFKy4AMDvhuWl5cOYV8d698UoEANoFFhc79hqXDnZQqnOXoxw3HG907WHOg1JYOvLhP756boddFxpA==",
+  "assets": {
+    "pdf.min.mjs.gz": {
+      "entry": "legacy/build/pdf.min.mjs",
+      "size": 537769,
+      "sha256": "522ad2c83bc8a0010e7f0cc60d0892b77c8d2bf2c9702dc12288311d94270f42"
+    },
+    "pdf.worker.min.mjs.gz": {
+      "entry": "legacy/build/pdf.worker.min.mjs",
+      "size": 1327591,
+      "sha256": "b4c8353ded0d88d2e2009574a29eb4e0c3ff7e942ecdf51ef5f71566a9667f31"
+    },
+    "LICENSE": {
+      "entry": "LICENSE",
+      "size": 10174,
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+    }
+  }
+}

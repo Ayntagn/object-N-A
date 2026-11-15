@@ -1,0 +1,38 @@
+{
+  "package": "pdf-lib",
+  "version": "1.17.1",
+  "integrity": "sha512-V/mpyJAoTsN4cnP31vc0wfNA1+p20evqqnap0KLoRUN0Yk/p3wN52DOEsL4oBFcLdb76hlpKPtzJIgo67j/XLw==",
+  "asset": {
+    "entry": "dist/pdf-lib.min.js",
+    "file": "pdf-lib.min.js.gz",
+    "bytes": 525099,
+    "sha256": "0f9a5cad07941f0826586c94e089d89b918c46e5c17cf2d5a3c6f666e3bc694f"
+  },
+  "notices": [
+    {
+      "name": "@pdf-lib/standard-fonts",
+      "version": "1.0.0",
+      "integrity": "sha512-hU30BK9IUN/su0Mn9VdlVKsWBS6GyhVfqjwl1FjZN4TxP6cCw0jP2w7V3Hf5uX7M0AZJ16vey9yE0ny7Sa59ZA=="
+    },
+    {
+      "name": "@pdf-lib/upng",
+      "version": "1.0.1",
+      "integrity": "sha512-dQK2FUMQtowVP00mtIksrlZhdFXQZPC+taih1q4CvPZ5vqdxR/LKBaFg0oAfzd1GlHZXXSPdQfzQnt+ViGvEIQ=="
+    },
+    {
+      "name": "pako",
+      "version": "1.0.10",
+      "integrity": "sha512-0DTvPVU3ed8+HNXOu5Bs+o//Mbdj9VNQMUOe9oKCwh8l0GNwpTDMKCWbRjgtD291AWnkAgkqA/LOnQS8AmS1tw=="
+    },
+    {
+      "name": "pako",
+      "version": "1.0.11",
+      "integrity": "sha512-4hLB8Py4zZce5s4yd9XzopqwVv/yGNhV1Bl8NTmCq1763HeK2+EwVTv+leGeL13Dnh2wfbqowVPXCIO0z4taYw=="
+    },
+    {
+      "name": "tslib",
+      "version": "1.11.1",
+      "integrity": "sha512-aZW88SY8kQbU7gpV19lN24LtXh/yD4ZZg6qieAJDDg+YBsJcSmLGK9QpnUjAKVG/xefmvJGd1WUmfpT/g6AJGA=="
+    }
+  ]
+}
