@@ -183,31 +183,33 @@ var previewThemeMenuIcons = sync.OnceValue(func() map[string]mygoui.MenuIcon {
 
 func (app *workspaceWindow) previewThemeSettings(c *mygoui.Context) {
 	current := normalizedPreviewThemeID(app.preferences.PreviewThemeID)
+	tr := app.tr
 	mygoui.Column(c).FillWidth().Gap(20).Children(func() {
-		app.settingsSection(c, "App Appearance", "paintpalette", func() {
+		app.settingsSection(c, tr("App Appearance", "应用外观"), "paintpalette", func() {
 			app.settingsCard(c).Gap(7).Children(func() {
 				app.appearanceChoices(c)
-				mygoui.Text(c, "Cyber is the original Synthetic Editorial dark theme. Blackout is pure black. "+
+				mygoui.Text(c, tr("Cyber is the original Synthetic Editorial dark theme. Blackout is pure black. "+
 					"PLATO is the phosphor-orange terminal homage. System Light and System Dark match the platform appearance. "+
-					"Document themes (Preview / PDF) are independent of this setting.").
+					"Document themes (Preview / PDF) are independent of this setting.",
+					"Cyber 是原有的 Synthetic Editorial 深色主题。Blackout 是纯黑主题。PLATO 沿用复古终端的橙色荧光风格。系统浅色和系统深色采用平台外观。文档预览和 PDF 的主题可单独设置。")).
 					FontSize(11).TextColor(c.Theme().TextMuted)
 			})
 		})
-		app.settingsSection(c, "Preview Theme", "doc.richtext", func() {
+		app.settingsSection(c, tr("Preview Theme", "预览主题"), "doc.richtext", func() {
 			app.settingsCard(c).Gap(10).Children(func() {
 				app.previewThemeGrid(c, current)
 			})
 		})
-		app.settingsSection(c, "Live Preview", "eye", func() {
+		app.settingsSection(c, tr("Live Preview", "实时预览"), "eye", func() {
 			app.settingsCard(c).Children(func() {
 				app.previewThemeSample(c, app.resolvePreviewTheme(current))
 			})
 		})
-		app.settingsSection(c, "Sidebar Appearance", "sidebar.left", func() {
+		app.settingsSection(c, tr("Sidebar Appearance", "侧栏外观"), "sidebar.left", func() {
 			app.settingsCard(c).Padding(8, 16).Children(func() {
-				app.settingsSwitch(c, "Color Tags by Category", "Give each tag a hue based on its name",
+				app.settingsSwitch(c, tr("Color Tags by Category", "按类别为标签着色"), tr("Give each tag a hue based on its name", "根据标签名称分配颜色"),
 					"paintpalette.fill", 48, &app.preferences.TagsColoredByHash)
-				app.settingsSwitch(c, "Color Graph by Tag", "Tint knowledge-graph nodes by their primary tag",
+				app.settingsSwitch(c, tr("Color Graph by Tag", "按标签为图谱着色"), tr("Tint knowledge-graph nodes by their primary tag", "按主要标签为知识图谱节点着色"),
 					"point.3.connected.trianglepath.dotted", 48, &app.preferences.GraphColorNodesByTag)
 			})
 		})
@@ -228,7 +230,7 @@ func (app *workspaceWindow) previewThemeGrid(c *mygoui.Context, current string) 
 					mygoui.Spacer(c).Basis(0).Grow(1)
 					continue
 				}
-				id, label, theme := systemPreviewThemeID, "System", app.resolvePreviewTheme(systemPreviewThemeID)
+				id, label, theme := systemPreviewThemeID, app.tr("System", "系统"), app.resolvePreviewTheme(systemPreviewThemeID)
 				if index > 0 {
 					theme = previewThemes[index-1]
 					id, label = theme.ID, theme.DisplayName
@@ -240,23 +242,25 @@ func (app *workspaceWindow) previewThemeGrid(c *mygoui.Context, current string) 
 }
 
 func (app *workspaceWindow) previewThemeSample(c *mygoui.Context, theme documentPreviewTheme) {
+	tr := app.tr
 	mygoui.Column(c).FillWidth().MinHeight(136).Padding(16).Gap(7).Radius(8).
 		Border(1, mygoui.Hex(theme.TableBorderColor)).Background(mygoui.Hex(theme.BackgroundColor)).
 		Children(func() {
-			mygoui.Text(c, "Heading").FontSize(13).Bold().TextColor(mygoui.Hex(theme.HeadingColor))
-			markdown.View(c, "Body text with **bold** and *italic* formatting.", &markdown.Options{Theme: theme.markdownTheme(100, 0)})
-			mygoui.Text(c, "Link text").FontSize(13).TextColor(mygoui.Hex(theme.LinkColor))
+			mygoui.Text(c, tr("Heading", "标题")).FontSize(13).Bold().TextColor(mygoui.Hex(theme.HeadingColor))
+			sample := tr("Body text with **bold** and *italic* formatting.", "正文可以使用 **粗体** 和 *斜体*。")
+			markdown.View(c, sample, &markdown.Options{Theme: theme.markdownTheme(100, 0)})
+			mygoui.Text(c, tr("Link text", "链接文字")).FontSize(13).TextColor(mygoui.Hex(theme.LinkColor))
 			mygoui.Row(c).Children(func() {
-				mygoui.Text(c, "Code block").Font("monospace").FontSize(12).Padding(7, 8).Radius(5).
+				mygoui.Text(c, tr("Code block", "代码块")).Font("monospace").FontSize(12).Padding(7, 8).Radius(5).
 					TextColor(mygoui.Hex(theme.CodeTextColor)).Background(mygoui.Hex(theme.CodeBackgroundColor))
 			})
 		})
 }
 
 func (app *workspaceWindow) previewThemeCard(c *mygoui.Context, id, label string, theme documentPreviewTheme, selected bool) {
-	kind := "Light"
+	kind, help := app.tr("Light", "浅色"), app.tr("Light preview theme", "浅色预览主题")
 	if theme.dark() {
-		kind = "Dark"
+		kind, help = app.tr("Dark", "深色"), app.tr("Dark preview theme", "深色预览主题")
 	}
 	colors := c.Theme()
 	accent := colors.Accent
@@ -265,7 +269,7 @@ func (app *workspaceWindow) previewThemeCard(c *mygoui.Context, id, label string
 	}
 	card := mygoui.ButtonBase(c.Key(id)).Basis(0).Grow(1).MinWidth(0).Height(54).
 		Padding(0, 10).Gap(10).AlignItems(mygoui.Center).Justify(mygoui.Start).Radius(8).
-		Label(label).Tooltip(kind + " preview theme").AccessSelected(selected).OnClick(func() {
+		Label(label).Tooltip(help).AccessSelected(selected).OnClick(func() {
 		app.preferences.PreviewThemeID = id
 		app.preferencesChanged()
 	})

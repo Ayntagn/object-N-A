@@ -96,12 +96,18 @@ func (app *workspaceWindow) appearanceChoices(c *mygoui.Context) {
 	labels := make([]string, len(appearanceOptions))
 	for i, option := range appearanceOptions {
 		labels[i] = option.label
+		switch option.mode {
+		case appearanceLight:
+			labels[i] = app.tr(option.label, "系统浅色")
+		case appearanceDark:
+			labels[i] = app.tr(option.label, "系统深色")
+		}
 		if option.mode == app.appAppearance() {
 			selected = i
 		}
 	}
 	mygoui.Row(c).FillWidth().Children(func() {
-		app.settingsSegments(c, "App Appearance", labels, 517, selected, func(value int) {
+		app.settingsSegments(c, app.tr("App Appearance", "应用外观"), labels, 517, selected, func(value int) {
 			app.setAppAppearance(appearanceOptions[value].mode)
 		})
 	})

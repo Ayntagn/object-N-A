@@ -9,7 +9,7 @@ import (
 //go:embed feature_guide
 var featureGuideImages embed.FS
 
-func guideIllustration(c *mygoui.Context, card *featureGuideCard) {
+func guideIllustration(c *mygoui.Context, card *featureGuideCard, language workspaceLanguage) {
 	if card.illustration == "" {
 		return
 	}
@@ -24,8 +24,9 @@ func guideIllustration(c *mygoui.Context, card *featureGuideCard) {
 		return bitmap
 	})
 	if *source != nil {
+		label := card.localizedCopy(language).title + language.text(" example", "示例")
 		box.Children(func() {
-			mygoui.Image(c, *source).Fill().Fit(mygoui.Contain).Label(card.title + " example")
+			mygoui.Image(c, *source).Fill().Fit(mygoui.Contain).Label(label)
 		})
 	} else {
 		box.Hidden(true)

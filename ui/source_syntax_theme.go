@@ -37,20 +37,39 @@ func sourceThemeForID(id string) sourceThemeChoice {
 }
 
 func (app *workspaceWindow) sourceThemeMenu(m *mygoui.Menu) {
+	app.drawSourceThemeMenu(m, false)
+}
+
+func (app *workspaceWindow) sourceThemeSettingsLabel(choice sourceThemeChoice) string {
+	if choice.id == systemSourceThemeID {
+		return app.tr(choice.label, "系统")
+	}
+	return choice.label
+}
+
+func (app *workspaceWindow) drawSourceThemeMenu(m *mygoui.Menu, localize bool) {
 	current := sourceThemeForID(app.preferences.EditorTheme).id
 	add := func(choice sourceThemeChoice) {
-		if m.Item(choice.label).Checked(choice.id == current).Chosen() {
+		label := choice.label
+		if localize {
+			label = app.sourceThemeSettingsLabel(choice)
+		}
+		if m.Item(label).Checked(choice.id == current).Chosen() {
 			app.preferences.EditorTheme = choice.id
 			app.preferencesChanged()
 		}
 	}
 	add(sourceThemeForID(systemSourceThemeID))
 	m.Separator()
-	m.Item("Dark").Disabled(true)
+	dark, light := "Dark", "Light"
+	if localize {
+		dark, light = app.tr(dark, "深色"), app.tr(light, "浅色")
+	}
+	m.Item(dark).Disabled(true)
 	for _, choice := range darkSourceThemes {
 		add(choice)
 	}
-	m.Item("Light").Disabled(true)
+	m.Item(light).Disabled(true)
 	for _, choice := range lightSourceThemes {
 		add(choice)
 	}

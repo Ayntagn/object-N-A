@@ -23,16 +23,17 @@ func (app *workspaceWindow) aiSettings(c *mygoui.Context) {
 }
 
 func (app *workspaceWindow) drawAISettingsContent(c *mygoui.Context) {
-	app.drawAISettingsSection(c, "Local AI Services", "network", func() {
+	tr := app.tr
+	app.drawAISettingsSection(c, tr("Local AI Services", "本地 AI 服务"), "network", func() {
 		mygoui.Row(c).Height(22).AlignItems(mygoui.Center).Children(func() {
-			mygoui.Text(c, "Auto-detected services on this computer").FontSize(12).TextColor(c.Theme().TextMuted)
+			mygoui.Text(c, tr("Auto-detected services on this computer", "自动检测此电脑上的服务")).FontSize(12).TextColor(c.Theme().TextMuted)
 			mygoui.Spacer(c)
-			mygoui.ButtonBase(c).Height(18).Label("Rescan").Disabled(true).Children(func() {
-				mygoui.Text(c, "Rescan").FontSize(11).TextColor(c.Theme().TextMuted)
+			mygoui.ButtonBase(c).Height(18).Label(tr("Rescan", "重新扫描")).Disabled(true).Children(func() {
+				mygoui.Text(c, tr("Rescan", "重新扫描")).FontSize(11).TextColor(c.Theme().TextMuted)
 			})
 		})
 		if runtime.GOOS == "darwin" {
-			drawAIServiceRow(c, "Apple Intelligence", "", "sparkles", "Unavailable")
+			drawAIServiceRow(c, "Apple Intelligence", "", "sparkles", tr("Unavailable", "不可用"))
 		}
 		for _, service := range [...]struct{ name, address, icon string }{
 			{"Ollama", "localhost:11434", "gauge.with.dots.needle.67percent"},
@@ -40,26 +41,27 @@ func (app *workspaceWindow) drawAISettingsContent(c *mygoui.Context) {
 			{"MLX (mlx-lm)", "localhost:8080", "apple.logo"},
 			{"vLLM", "localhost:8000", "bolt"},
 		} {
-			drawAIServiceRow(c, service.name, service.address, service.icon, "Not connected")
+			drawAIServiceRow(c, service.name, service.address, service.icon, tr("Not connected", "未连接"))
 		}
 	})
-	app.drawAISettingsSection(c, "Cloud Services", "globe", func() {
+	app.drawAISettingsSection(c, tr("Cloud Services", "云端服务"), "globe", func() {
 		mygoui.Row(c).AlignItems(mygoui.Center).Children(func() {
-			mygoui.Text(c, "Requires an API key").FontSize(12).TextColor(c.Theme().TextMuted)
+			mygoui.Text(c, tr("Requires an API key", "需要 API 密钥")).FontSize(12).TextColor(c.Theme().TextMuted)
 			mygoui.Spacer(c)
-			mygoui.Button(c, "Show 7").Disabled(true)
+			mygoui.Button(c, tr("Show 7", "显示 7 项")).Disabled(true)
 		})
 	})
-	app.drawAISettingsSection(c, "Connection", "link", func() {
-		app.aiConnectionForm.draw(c, app.refreshAIModels, app.testAIConnection, app.saveAIConnection)
+	app.drawAISettingsSection(c, tr("Connection", "连接"), "link", func() {
+		app.aiConnectionForm.draw(c, app.interfaceLanguage(), app.refreshAIModels, app.testAIConnection, app.saveAIConnection)
 	})
-	app.drawAISettingsSection(c, "Panel", "sidebar.right", func() {
-		settingsRow(c, "Panel Position", "Which side of the editor the AI panel appears", "sidebar.left", 40, func() {
+	app.drawAISettingsSection(c, tr("Panel", "面板"), "sidebar.right", func() {
+		label := tr("Panel Position", "面板位置")
+		settingsRow(c, label, tr("Which side of the editor the AI panel appears", "选择 AI 面板在编辑器哪一侧显示"), "sidebar.left", 40, func() {
 			selected := 0
 			if app.preferences.AIPanelRight {
 				selected = 1
 			}
-			app.settingsSegments(c, "Panel Position", []string{"Left", "Right"}, 114, selected, func(i int) {
+			app.settingsSegments(c, label, []string{tr("Left", "左侧"), tr("Right", "右侧")}, 114, selected, func(i int) {
 				app.setAIPanelRight(i == 1)
 			})
 		})
@@ -73,33 +75,37 @@ func (app *workspaceWindow) setAIPanelRight(right bool) {
 	}
 }
 
-func (form *workspaceAIConnectionForm) draw(c *mygoui.Context, refresh, test, save func()) {
+func (form *workspaceAIConnectionForm) draw(c *mygoui.Context, language workspaceLanguage, refresh, test, save func()) {
+	tr := language.text
 	connection := mygoui.Column(c.Key("AI connection")).FillWidth().Gap(14)
 	revealKey := mygoui.Local(connection, "show API key", func() bool { return false })
+	baseURL := tr("Base URL", "服务地址")
+	model := tr("Model", "模型")
+	apiKey := tr("API Key (optional)", "API 密钥（可选）")
 	connection.Children(func() {
-		aiConnectionField(c, "Base URL", func() {
-			aiConnectionInput(c, &form.Draft.BaseURL, "Base URL", "http://localhost:1234/v1").FillWidth()
+		aiConnectionField(c, baseURL, func() {
+			aiConnectionInput(c, &form.Draft.BaseURL, baseURL, "http://localhost:1234/v1").FillWidth()
 		})
-		aiConnectionField(c, "Model", func() {
+		aiConnectionField(c, model, func() {
 			mygoui.Row(c).FillWidth().AlignItems(mygoui.Center).Gap(6).Children(func() {
 				if len(form.Models) == 0 {
-					aiConnectionInput(c, &form.Draft.Model, "Model", "model-name").Grow(1)
+					aiConnectionInput(c, &form.Draft.Model, model, "model-name").Grow(1)
 				} else {
 					mygoui.Select(c.Key("pick AI model"), &form.Draft.Model, form.Models).
-						Label("Model").Size(187, 24).MinWidth(0)
+						Label(model).Size(187, 24).MinWidth(0)
 				}
-				chromeControl(c.Key("refresh AI models"), "Refresh", form.Refreshing || refresh == nil).
+				chromeControl(c.Key("refresh AI models"), tr("Refresh", "刷新模型"), form.Refreshing || refresh == nil).
 					Size(31.5, 20).KeepFocus().OnClick(refresh).Children(func() {
 					aiWorkspaceIcon(c, "arrow.clockwise", "arrow.counterclockwise", 14, c.Theme().TextMuted)
 				})
 			})
 		})
-		aiConnectionField(c, "API Key (optional)", func() {
+		aiConnectionField(c, apiKey, func() {
 			mygoui.Row(c).FillWidth().AlignItems(mygoui.Center).Gap(6).Children(func() {
-				key := aiConnectionInput(c, &form.Draft.APIKey, "API Key (optional)", "sk-...").Grow(1).MinWidth(0)
-				label, symbol := "Show", "eye"
+				key := aiConnectionInput(c, &form.Draft.APIKey, apiKey, "sk-...").Grow(1).MinWidth(0)
+				label, symbol := tr("Show", "显示密钥"), "eye"
 				if *revealKey {
-					label, symbol = "Hide", "eye.slash"
+					label, symbol = tr("Hide", "隐藏密钥"), "eye.slash"
 				} else {
 					key.Password()
 				}
@@ -110,19 +116,34 @@ func (form *workspaceAIConnectionForm) draw(c *mygoui.Context, refresh, test, sa
 			})
 		})
 		mygoui.Row(c).FillWidth().AlignItems(mygoui.Center).Gap(8).Margin(15, 0, 0).Children(func() {
-			mygoui.Button(c, "Test").Size(56.5, 20).Disabled(form.Testing || test == nil).OnClick(test)
+			mygoui.Button(c, tr("Test", "测试")).Size(56.5, 20).Disabled(form.Testing || test == nil).OnClick(test)
 			mygoui.Button(c, "cURL").Size(66, 20).Disabled(true)
 			mygoui.Spacer(c)
-			mygoui.Button(c, "Save").Size(45.5, 20).Disabled(save == nil).OnClick(save)
+			mygoui.Button(c, tr("Save", "保存")).Size(45.5, 20).Disabled(save == nil).OnClick(save)
 		})
 		if form.Status != "" {
 			role, color := mygoui.RoleStatus, c.Theme().TextMuted
 			if form.StatusError {
 				role, color = mygoui.RoleAlert, c.Theme().Danger
 			}
-			mygoui.Text(c, form.Status).FillWidth().FontSize(12).Wrap().Role(role).TextColor(color)
+			mygoui.Text(c, aiConnectionStatus(language, form.Status)).FillWidth().FontSize(12).Wrap().Role(role).TextColor(color)
 		}
 	})
+}
+
+func aiConnectionStatus(language workspaceLanguage, status string) string {
+	switch status {
+	case "Connected":
+		return language.text(status, "已连接")
+	case "Settings saved":
+		return language.text(status, "设置已保存")
+	case "Could not save the API key in the system credential store.":
+		return language.text(status, "无法将 API 密钥保存到系统凭据存储。")
+	case "Could not save the AI connection.":
+		return language.text(status, "无法保存 AI 连接。")
+	default:
+		return status
+	}
 }
 
 func aiConnectionField(c *mygoui.Context, label string, body func()) {

@@ -7,33 +7,35 @@ import (
 )
 
 func (app *workspaceWindow) generalSettings(c *mygoui.Context) {
+	tr := app.tr
 	theme := *c.Theme()
 	if app.blackout && !c.Preferences().HighContrast {
 		theme.TextMuted = mygoui.Hex("#c1c2cc")
 	}
 	mygoui.Themed(c, &theme).FillWidth().Gap(20).Children(func() {
-		app.settingsSection(c, "Editor", "text.cursor", func() {
+		app.interfaceLanguageSettings(c)
+		app.settingsSection(c, tr("Editor", "编辑器"), "text.cursor", func() {
 			app.settingsCard(c).Padding(10, 16).Children(func() {
 				app.generalEditorGrid(c)
 			})
 		})
-		app.settingsSection(c, "Vault", "building.columns", func() {
+		app.settingsSection(c, tr("Vault", "资料库"), "building.columns", func() {
 			app.settingsCard(c).Padding(16).Children(func() {
 				app.generalVaultSettings(c)
 			})
 		})
 		view := func() {
-			app.settingsSection(c, "View", "rectangle.split.3x1", func() {
+			app.settingsSection(c, tr("View", "视图"), "rectangle.split.3x1", func() {
 				app.settingsCard(c).Padding(8, 16).Children(func() {
 					app.generalViewSettings(c)
 				})
 			})
 		}
 		startup := func() {
-			app.settingsSection(c, "Startup", "power", func() {
+			app.settingsSection(c, tr("Startup", "启动"), "power", func() {
 				app.settingsCard(c).Padding(8, 16).Children(func() {
-					app.settingsSwitch(c, "Welcome Screen", "Show on launch", "hand.wave", 60, &app.preferences.ShowWelcomeOnLaunch)
-					drawAutoSaveStatus(c)
+					app.settingsSwitch(c, tr("Welcome Screen", "欢迎页"), tr("Show on launch", "启动时显示"), "hand.wave", 60, &app.preferences.ShowWelcomeOnLaunch)
+					app.drawAutoSaveStatus(c)
 				})
 			})
 		}
@@ -56,17 +58,17 @@ func (app *workspaceWindow) generalSettings(c *mygoui.Context) {
 }
 
 // EV-UI-247: Auto-Save is a read-only status in the Startup card.
-func drawAutoSaveStatus(c *mygoui.Context) {
+func (app *workspaceWindow) drawAutoSaveStatus(c *mygoui.Context) {
 	theme := c.Theme()
 	mygoui.Row(c.Key("Auto-Save")).FillWidth().MinHeight(60).Gap(16).AlignItems(mygoui.Center).Children(func() {
 		mygoui.Box(c).Size(20, 20).Shrink(0).Center().Role(mygoui.RoleNone).Children(func() {
 			chromeIconColor(c, "doc.badge.clock", 17, theme.TextMuted)
 		})
 		mygoui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
-			mygoui.Text(c, "Auto-Save").FontSize(13).FontWeight(600)
-			mygoui.Text(c, "Always enabled").FontSize(11).TextColor(theme.TextMuted)
+			mygoui.Text(c, app.tr("Auto-Save", "自动保存")).FontSize(13).FontWeight(600)
+			mygoui.Text(c, app.tr("Always enabled", "始终启用")).FontSize(11).TextColor(theme.TextMuted)
 		})
-		mygoui.Text(c, "ALWAYS ON").FontSize(10).FontWeight(650).TextColor(theme.TextMuted).
+		mygoui.Text(c, app.tr("ALWAYS ON", "始终开启")).FontSize(10).FontWeight(650).TextColor(theme.TextMuted).
 			SingleLine().Padding(4, 7).Radius(5).Background(theme.SurfaceHover).Shrink(0)
 	})
 }
@@ -74,32 +76,41 @@ func drawAutoSaveStatus(c *mygoui.Context) {
 // EV-UI-022: Supported Editor options retain their positions in the two-column grid.
 func (app *workspaceWindow) generalEditorGrid(c *mygoui.Context) {
 	p := app.preferences
+	tr := app.tr
 	rows := [][2]func(){
 		{
-			func() { app.settingsSwitch(c, "Line Numbers", "Show in editor", "number", 60, &p.LineNumbers) },
+			func() {
+				app.settingsSwitch(c, tr("Line Numbers", "行号"), tr("Show in editor", "在编辑器中显示"), "number", 60, &p.LineNumbers)
+			},
 			func() {
 				size := app.sourceFontSize()
-				settingsRow(c, "Font Size", strconv.Itoa(size)+" pt", "textformat.size", 60, func() {
+				settingsRow(c, tr("Font Size", "字号"), strconv.Itoa(size)+" pt", "textformat.size", 60, func() {
 					app.settingsFontStepper(c, size)
 				})
 			},
 		},
 		{
 			func() { app.sourceLineSpacingSettings(c) },
-			func() { settingsMenuRow(c, "Editor Font", app.editorFontLabel(), "textformat", app.editorFontMenu) },
+			func() {
+				settingsMenuRow(c, tr("Editor Font", "编辑器字体"), app.editorFontLabel(), "textformat", func(menu *mygoui.Menu) {
+					app.editorFontMenuWithSystem(menu, app.tr(systemMonoLabel, "系统等宽字体"))
+				})
+			},
 		},
 		{
 			func() {
-				settingsMenuRow(c, "Color Theme", sourceThemeForID(p.EditorTheme).label, "paintbrush", app.sourceThemeMenu)
+				settingsMenuRow(c, tr("Color Theme", "配色主题"), app.sourceThemeSettingsLabel(sourceThemeForID(p.EditorTheme)), "paintbrush", func(menu *mygoui.Menu) {
+					app.drawSourceThemeMenu(menu, true)
+				})
 			},
 			func() { app.sourceSpellSettings(c) },
 		},
 		{
 			func() {
-				app.settingsSwitch(c, "Collapse Hex Colors", "Show as color blocks", "paintpalette", 60, &p.CollapseHexColors)
+				app.settingsSwitch(c, tr("Collapse Hex Colors", "折叠十六进制颜色"), tr("Show as color blocks", "显示为色块"), "paintpalette", 60, &p.CollapseHexColors)
 			},
 			func() {
-				app.settingsSwitch(c, "Number Figures", "Prefix image captions with Figure 1., Figure 2.", "photo.badge.plus", 60, &p.NumberFigures)
+				app.settingsSwitch(c, tr("Number Figures", "图片编号"), tr("Prefix image captions with Figure 1., Figure 2.", "在图注前加上图 1、图 2 等编号"), "photo.badge.plus", 60, &p.NumberFigures)
 			},
 		},
 	}
@@ -143,15 +154,16 @@ func settingsMenuRowWithDetail(c *mygoui.Context, title, value, detail, symbol s
 }
 
 func (app *workspaceWindow) settingsFontStepper(c *mygoui.Context, size int) {
+	reset := app.tr("Reset Font Size", "重置字号")
 	mygoui.Row(c).Size(90, 26).Shrink(0).Border(1, c.Theme().Border).Radius(6).Children(func() {
-		chromeButton(c.Key("Decrease Font Size"), "minus", "Decrease Font Size", func() {
+		chromeButton(c.Key("Decrease Font Size"), "minus", app.tr("Decrease Font Size", "减小字号"), func() {
 			app.changeToolbarFontSize(-1)
 		}).Size(28, 26).Disabled(size <= sourceFontMenuMin)
-		mygoui.ButtonBase(c.Key("Reset Font Size")).Size(34, 26).Center().Label("Reset Font Size").
-			Tooltip("Reset Font Size").OnClick(func() { app.changeFontSize(0) }).Children(func() {
+		mygoui.ButtonBase(c.Key("Reset Font Size")).Size(34, 26).Center().Label(reset).
+			Tooltip(reset).OnClick(func() { app.changeFontSize(0) }).Children(func() {
 			mygoui.Text(c, strconv.Itoa(size)).FontSize(13).Bold().Role(mygoui.RoleNone)
 		})
-		chromeButton(c.Key("Increase Font Size"), "plus", "Increase Font Size", func() {
+		chromeButton(c.Key("Increase Font Size"), "plus", app.tr("Increase Font Size", "增大字号"), func() {
 			app.changeToolbarFontSize(1)
 		}).Size(28, 26).Disabled(size >= sourceFontMax)
 	})
@@ -159,22 +171,23 @@ func (app *workspaceWindow) settingsFontStepper(c *mygoui.Context, size int) {
 
 func (app *workspaceWindow) generalVaultSettings(c *mygoui.Context) {
 	p := app.preferences
+	tr := app.tr
 	app.drawVaultOpenPreferences(c)
-	newDocument := "Blank doc; saves into the open vault"
+	newDocument := tr("Blank doc; saves into the open vault", "创建空白文档，保存时写入当前资料库")
 	if p.NewInVault {
-		newDocument = "Create a note in the open vault"
+		newDocument = tr("Create a note in the open vault", "在当前资料库中创建笔记")
 	}
-	app.vaultSettingsSegments(c, "New Document", newDocument, "doc.badge.plus", 138, p.NewInVault,
-		[]string{"Blank", "In vault"}, func(value int) {
+	app.vaultSettingsSegments(c, tr("New Document", "新建文档"), newDocument, "doc.badge.plus", 138, p.NewInVault,
+		[]string{tr("Blank", "空白"), tr("In vault", "资料库内")}, func(value int) {
 			p.NewInVault = value == 1
 			app.preferencesChanged()
 		})
-	sidebarFiles := "Supported file types only"
+	sidebarFiles := tr("Supported file types only", "只显示支持的文件类型")
 	if p.VaultShowAllFiles {
-		sidebarFiles = "All files - unsupported ones open in their default app"
+		sidebarFiles = tr("All files - unsupported ones open in their default app", "显示全部文件，其他类型使用默认应用打开")
 	}
-	app.vaultSettingsSegments(c, "Show in Sidebar", sidebarFiles, "doc.on.doc", 178, p.VaultShowAllFiles,
-		[]string{"Supported", "All"}, func(value int) {
+	app.vaultSettingsSegments(c, tr("Show in Sidebar", "侧栏显示"), sidebarFiles, "doc.on.doc", 178, p.VaultShowAllFiles,
+		[]string{tr("Supported", "支持的类型"), tr("All", "全部")}, func(value int) {
 			p.VaultShowAllFiles = value == 1
 			app.preferencesChanged()
 			for _, window := range app.documentWindows() {
@@ -183,12 +196,12 @@ func (app *workspaceWindow) generalVaultSettings(c *mygoui.Context) {
 				}
 			}
 		})
-	extensions := "Hidden on .md notes, shown on everything else"
+	extensions := tr("Hidden on .md notes, shown on everything else", "隐藏笔记的 .md 扩展名，显示其他扩展名")
 	if p.ShowExtension {
-		extensions = "Show file extensions"
+		extensions = tr("Show file extensions", "显示文件扩展名")
 	}
-	app.vaultSettingsSegments(c, "File Extensions", extensions, "textformat", 159, p.ShowExtension,
-		[]string{"Hide .md", "Show All"}, func(value int) {
+	app.vaultSettingsSegments(c, tr("File Extensions", "文件扩展名"), extensions, "textformat", 159, p.ShowExtension,
+		[]string{tr("Hide .md", "隐藏 .md"), tr("Show All", "全部显示")}, func(value int) {
 			p.ShowExtension = value == 1
 			app.preferencesChanged()
 		})
@@ -208,15 +221,17 @@ func (app *workspaceWindow) vaultSettingsSegments(c *mygoui.Context, title, deta
 
 func (app *workspaceWindow) generalViewSettings(c *mygoui.Context) {
 	p := app.preferences
+	tr := app.tr
+	defaultView := tr("Default View", "默认视图")
 	mygoui.Column(c).FillWidth().MinHeight(60).Gap(5).Padding(6, 0, 6, 36).Children(func() {
-		mygoui.Text(c, "Default View").FontSize(13).FontWeight(600).Role(mygoui.RoleNone)
+		mygoui.Text(c, defaultView).FontSize(13).FontWeight(600).Role(mygoui.RoleNone)
 		mygoui.Row(c).FillWidth().Children(func() {
-			app.settingsSegments(c, "Default View", []string{"Editor", "Split", "Preview"}, 218, p.DefaultView, func(value int) {
+			app.settingsSegments(c, defaultView, []string{tr("Editor", "编辑"), tr("Split", "分栏"), tr("Preview", "预览")}, 218, p.DefaultView, func(value int) {
 				p.DefaultView = value
 				app.preferencesChanged()
 			})
 		})
 	})
-	app.settingsSwitch(c, "Scroll Sync", "Sync editor & preview", "arrow.up.arrow.down", 60, &p.ScrollSyncEnabled)
-	app.settingsSwitch(c, "Scroll Past End", "Extra space at bottom", "arrow.down.to.line", 60, &p.ScrollPastEnd)
+	app.settingsSwitch(c, tr("Scroll Sync", "同步滚动"), tr("Sync editor & preview", "同步编辑器和预览的滚动位置"), "arrow.up.arrow.down", 60, &p.ScrollSyncEnabled)
+	app.settingsSwitch(c, tr("Scroll Past End", "滚过文末"), tr("Extra space at bottom", "在文末保留额外空间"), "arrow.down.to.line", 60, &p.ScrollPastEnd)
 }

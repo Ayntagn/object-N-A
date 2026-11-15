@@ -21,13 +21,14 @@ type sourceSpellCheck struct {
 type sourceSpellingRange struct{ Location, Length uint }
 
 func (app *workspaceWindow) sourceSpellSettings(c *mygoui.Context) {
+	label := app.tr("Spell Check", "拼写检查")
 	if sourceSpellAvailable {
-		app.settingsSwitch(c, "Spell Check", "Check as you type", "", 60, &app.preferences.SpellCheckEnabled)
+		app.settingsSwitch(c, label, app.tr("Check as you type", "输入时检查拼写"), "", 60, &app.preferences.SpellCheckEnabled)
 		return
 	}
-	settingsRow(c, "Spell Check", "Unavailable on this platform", "", 60, func() {
+	settingsRow(c, label, app.tr("Unavailable on this platform", "当前平台不可用"), "", 60, func() {
 		var off bool
-		mygoui.Switch(c, &off).Label("Spell Check").Size(36, 20).Disabled(true).Shrink(0)
+		mygoui.Switch(c, &off).Label(label).Size(36, 20).Disabled(true).Shrink(0)
 	})
 }
 

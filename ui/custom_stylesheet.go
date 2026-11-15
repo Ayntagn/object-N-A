@@ -142,14 +142,15 @@ func (style *workspaceStylesheet) flush(app *workspaceWindow) bool {
 		if err == nil && current != style.disk && current != style.text {
 			style.disk = current
 			style.conflicted = true
-			err = errors.New("the file changed outside Settings. Review your draft and edit it again to save")
+			err = errors.New(app.tr("the file changed outside Settings. Review your draft and edit it again to save",
+				"文件已在设置以外被修改。检查草稿后，再次编辑以保存。"))
 		}
 	}
 	if err == nil {
 		err = exportdoc.WriteFile(file, []byte(style.text))
 	}
 	if err != nil {
-		style.problem = "Could not save custom.css. " + err.Error()
+		style.problem = app.tr("Could not save custom.css. ", "无法保存 custom.css。") + err.Error()
 		app.invalidateStylesheet()
 		return false
 	}
@@ -174,7 +175,7 @@ func (style *workspaceStylesheet) reveal(app *workspaceWindow) {
 			return
 		}
 	} else if err != nil {
-		style.problem = "Could not locate custom.css. " + err.Error()
+		style.problem = app.tr("Could not locate custom.css. ", "找不到 custom.css。") + err.Error()
 		return
 	}
 	mygo.Shell.ShowItemInFolder(file)
@@ -185,6 +186,7 @@ func (app *workspaceWindow) customStylesheetSettings(c *mygoui.Context) {
 		return
 	}
 	style := &app.application.stylesheet
+	tr := app.tr
 	if !style.dirty {
 		if file, err := customStylesheetPath(); err == nil {
 			if css, err := readCustomStylesheet(file); err == nil && css != style.disk {
@@ -199,27 +201,28 @@ func (app *workspaceWindow) customStylesheetSettings(c *mygoui.Context) {
 	}
 	mygoui.Column(c.Key("custom stylesheet")).FillWidth().Gap(8).Margin(12, 0, 0).Children(func() {
 		mygoui.Row(c).FillWidth().Height(20).Gap(9).AlignItems(mygoui.Center).Children(func() {
-			mygoui.Text(c, "Custom Stylesheet").FontSize(13).Bold().Role(mygoui.RoleHeading)
-			chromeButtonIcon(c, "questionmark.circle", "Custom Stylesheet Help", func() {
+			mygoui.Text(c, tr("Custom Stylesheet", "自定义样式表")).FontSize(13).Bold().Role(mygoui.RoleHeading)
+			chromeButtonIcon(c, "questionmark.circle", tr("Custom Stylesheet Help", "自定义样式表帮助"), func() {
 				app.openFeatureGuide("custom-css", app.settings)
 			}, 12, helpInk).Size(12, 12)
 			mygoui.Spacer(c)
-			mygoui.Switch(c, &app.preferences.UserStylesheetEnabled).Label("Enable Custom Stylesheet").
+			mygoui.Switch(c, &app.preferences.UserStylesheetEnabled).Label(tr("Enable Custom Stylesheet", "启用自定义样式表")).
 				Size(36, 20).OnChange(func() {
 				app.preferencesChanged()
 				app.invalidateStylesheet()
 			})
 		})
-		mygoui.Text(c, "Your own CSS, applied to every note's preview and to PDF and HTML export. It loads after the theme, so your rules win.").
+		mygoui.Text(c, tr("Your own CSS, applied to every note's preview and to PDF and HTML export. It loads after the theme, so your rules win.",
+			"自定义 CSS 适用于所有笔记的预览以及 PDF 和 HTML 导出。它在主题之后加载，按层叠规则覆盖主题样式。")).
 			FontSize(11).Wrap().TextColor(theme.TextMuted)
 		rows := strings.Count(style.text, "\n") + 1
 		height := max(float32(220), float32(rows)*16.5)
-		mygoui.TextArea(c.Key("stylesheet editor"), &style.text).Label("Custom CSS").
+		mygoui.TextArea(c.Key("stylesheet editor"), &style.text).Label(tr("Custom CSS", "自定义 CSS")).
 			FillWidth().Height(height).Shrink(0).Font("monospace").FontSize(12).FixedLineHeight(16.5).
 			Padding(6).Radius(6).Background(editorFill).Border(1, editorEdge).
 			OnChange(func() { style.change(app) })
 		mygoui.Row(c).FillWidth().Height(20).Gap(8).AlignItems(mygoui.Center).Children(func() {
-			mygoui.Button(c, "Insert Starter Template").Size(141, 20).FontSize(11).Padding(0).
+			mygoui.Button(c, tr("Insert Starter Template", "插入示例模板")).Size(141, 20).FontSize(11).Padding(0).
 				Background(buttonFill).Disabled(strings.TrimSpace(style.text) != "").OnClick(func() {
 				if strings.TrimSpace(style.text) != "" {
 					return
@@ -227,9 +230,9 @@ func (app *workspaceWindow) customStylesheetSettings(c *mygoui.Context) {
 				style.text = starterStylesheet
 				style.change(app)
 			})
-			reveal := "Reveal in File Manager"
+			reveal := tr("Reveal in File Manager", "在文件管理器中显示")
 			if runtime.GOOS == "darwin" {
-				reveal = "Reveal in Finder"
+				reveal = tr("Reveal in Finder", "在访达中显示")
 			}
 			revealButton := mygoui.Button(c, reveal).Height(20).FontSize(11).Padding(0, 10).
 				Background(buttonFill).OnClick(func() { style.reveal(app) })
@@ -238,13 +241,14 @@ func (app *workspaceWindow) customStylesheetSettings(c *mygoui.Context) {
 			}
 			mygoui.Spacer(c)
 			if time.Now().Before(style.savedUntil) {
-				mygoui.Text(c, "Saved").FontSize(11).TextColor(theme.TextMuted).Role(mygoui.RoleStatus)
+				mygoui.Text(c, tr("Saved", "已保存")).FontSize(11).TextColor(theme.TextMuted).Role(mygoui.RoleStatus)
 			}
 		})
 		if style.problem != "" {
 			mygoui.Text(c, style.problem).FontSize(11).Wrap().TextColor(theme.Danger).Role(mygoui.RoleAlert)
 		}
-		mygoui.Text(c, "Edits here and edits made in another editor both take effect on the next render.").
+		mygoui.Text(c, tr("Edits here and edits made in another editor both take effect on the next render.",
+			"在此处或其他编辑器中所做的修改，会在下次渲染时生效。")).
 			FontSize(11).Wrap().TextColor(theme.TextMuted)
 	})
 }

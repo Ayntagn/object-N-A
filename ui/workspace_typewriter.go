@@ -61,8 +61,9 @@ func typewriterPosition(position float64) float64 {
 
 func (app *workspaceWindow) typewriterSettings(c *mygoui.Context) {
 	prefs := app.preferences
-	app.settingsSwitch(c, "Typewriter Mode", "Keep the active line at a fixed height", "text.cursor", 54, &prefs.TypewriterMode)
-	app.settingsSwitch(c, "Auto-Indent Paragraphs", "Insert two full-width spaces in new source paragraphs",
+	tr := app.tr
+	app.settingsSwitch(c, tr("Typewriter Mode", "打字机模式"), tr("Keep the active line at a fixed height", "将正在编辑的行保持在固定高度"), "text.cursor", 54, &prefs.TypewriterMode)
+	app.settingsSwitch(c, tr("Auto-Indent Paragraphs", "自动缩进段落"), tr("Insert two full-width spaces in new source paragraphs", "在源码的新段落开头插入两个全角空格"),
 		"text.alignleft", 54, &prefs.AutoIndentParagraphs)
 	if !prefs.TypewriterMode {
 		return
@@ -72,8 +73,8 @@ func (app *workspaceWindow) typewriterSettings(c *mygoui.Context) {
 		Padding(10, 12).Radius(8).Background(theme.Surface).Border(1, theme.Border).
 		Children(func() {
 			mygoui.Column(c).Basis(188).Grow(1).MinWidth(0).MaxWidthPercent(100).Gap(4).Children(func() {
-				mygoui.Text(c, "Active Line Position").FontSize(13).FontWeight(600)
-				mygoui.Text(c, "Click in the page to choose where the active line stays while typing.").
+				mygoui.Text(c, tr("Active Line Position", "当前行的位置")).FontSize(13).FontWeight(600)
+				mygoui.Text(c, tr("Click in the page to choose where the active line stays while typing.", "点击页面缩略图，设置输入时当前行的位置。")).
 					FontSize(11).TextColor(theme.TextMuted)
 			})
 			app.typewriterPositionPreview(c)
@@ -87,8 +88,8 @@ func (app *workspaceWindow) typewriterPositionPreview(c *mygoui.Context) {
 	value := 100 * (1 - typewriterPosition(prefs.TypewriterPosition))
 	page := mygoui.SliderBase(c.Key("typewriter position"), &value, 0, 100).
 		Vertical().Step(1).Size(192, 232).Shrink(0).MaxWidthPercent(100).Padding(inset-border, 12).
-		Radius(6).Background(theme.Background).Border(border, theme.Border).Label("Typewriter Position")
-	page.Value(fmt.Sprintf("%.0f%% from top", 100-value))
+		Radius(6).Background(theme.Background).Border(border, theme.Border).Label(app.tr("Typewriter Position", "打字机位置"))
+	page.Value(fmt.Sprintf(app.tr("%.0f%% from top", "距顶部 %.0f%%"), 100-value))
 	setPosition := func(position float64) {
 		if prefs.TypewriterPosition != position {
 			prefs.TypewriterPosition = position

@@ -30,14 +30,20 @@ func sourceLineSpacingChoice(value float64) sourceLineSpacing {
 
 func (app *workspaceWindow) sourceLineSpacingSettings(c *mygoui.Context) {
 	choice := sourceLineSpacingChoice(app.preferences.EditorLineHeight)
-	detail := "System default"
+	detail := app.tr("System default", "系统默认")
 	if choice.value != 0 {
 		detail = strconv.FormatFloat(choice.value, 'f', 2, 64)
 	}
-	settingsMenuRowWithDetail(c, "Line Spacing", choice.label, detail,
+	label := func(option sourceLineSpacing) string {
+		if option.value == 0 {
+			return app.tr(option.label, "默认")
+		}
+		return option.label
+	}
+	settingsMenuRowWithDetail(c, app.tr("Line Spacing", "行距"), label(choice), detail,
 		"arrow.up.and.down.text.horizontal", func(menu *mygoui.Menu) {
 			for _, option := range sourceLineSpacingChoices {
-				if menu.Item(option.label).Checked(option.value == choice.value).Chosen() &&
+				if menu.Item(label(option)).Checked(option.value == choice.value).Chosen() &&
 					option.value != app.preferences.EditorLineHeight {
 					app.preferences.EditorLineHeight = option.value
 					app.preferencesChanged()
