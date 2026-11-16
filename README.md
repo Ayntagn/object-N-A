@@ -98,7 +98,3 @@ sh packaging/install-linux.sh dist/object-n-a
 ## 切换设置与帮助语言
 
 在 **Settings → General → Settings & Help Language** 点击 **简体中文**。设置页、帮助菜单、功能指南、键盘快捷键和欢迎页会即时切换。回到 **设置 → 通用 → 设置与帮助语言** 点击 **English** 可切回英文。语言选择会在重启后保留。
-
-## 验证范围
-
-v0.2.0（构建 159）在 Apple silicon 本机构建，校验了 Bundle 签名，并从 Bundle 执行 `-version`。Windows 和 Linux 的 amd64 交叉编译通过，Linux 的安装文件及 `.desktop` 命令在隔离目录验证。Windows 开始菜单和 Linux 桌面启动仍待对应平台实机验证。程序内版本字符串仍为 v0.1.0。
