@@ -9,6 +9,7 @@ import (
 
 	"cyberwriter/internal/core/workspace"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/sfsymbols"
 	mygoui "github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 )
@@ -86,6 +87,7 @@ func (app *workspaceWindow) view(c *mygoui.Context) {
 	app.glowShadeView(c)
 	app.drawVaultSetup(c)
 	app.drawTemplateNotice(c)
+	app.drawAIVaultBuildSheet(c)
 	if !app.modalOpen {
 		app.drawCommandPalette(c)
 		app.drawQuickSwitcher(c)
@@ -267,9 +269,11 @@ func (app *workspaceWindow) sidebar(c *mygoui.Context) {
 	revealWorkspacePage(c, sidebar, sidebar, page, c.Theme().Surface)
 	sidebar.Children(func() {
 		if app.showingAI() {
+			composer := app.aiComposerOptions()
+			aiReferenceDrop(sidebar, composer.dropReferences)
 			app.ai.draw(c, app.blackout, func() { app.vaultTabs(c, false) }, app.openAISettings, func() {
 				app.setVaultPanelVisible(false)
-			}, app.aiComposerOptions())
+			}, composer)
 			return
 		}
 		app.vaultToolbar(c)
@@ -288,6 +292,7 @@ func (app *workspaceWindow) sidebar(c *mygoui.Context) {
 		})
 		tagged := app.index.data.GraphTagFiles(app.graph.tag)
 		filtering := app.fileSearch != "" || app.graph.tag != ""
+		app.drawVaultEmbeddingOffer(c)
 		showRecents := !filtering && len(app.recentPaths) > 0
 		if showRecents {
 			app.recentHeader(c)
@@ -434,22 +439,22 @@ func (app *workspaceWindow) revealFolder(relative string) {
 func (app *workspaceWindow) statusBar(c *mygoui.Context) {
 	app.workingText()
 	mygoui.Toolbar(c, func() {
-		mygoui.ScrollHorizontal(c.Key("breadcrumbs")).Grow(1).MinWidth(0).Height(18).Gap(3).
+		mygoui.ScrollHorizontal(c.Key("breadcrumbs")).Grow(1).MinWidth(0).Height(18).Padding(0, 4).Gap(7.5).
 			AlignItems(mygoui.Center).Label("Document path").Children(func() {
-			if app.currentVaultPath() == "" {
+			parts, collapsed := app.documentBreadcrumbs()
+			if len(parts) == 0 && collapsed == "" {
 				mygoui.Text(c, app.title()).FontSize(11).SingleLine()
 				return
 			}
-			app.breadcrumb(c, filepath.Base(app.root), "", false)
-			segments := strings.Split(app.document.Path, "/")
-			for index, segment := range segments {
-				mygoui.Text(c, "›").FontSize(11).TextColor(c.Theme().TextMuted).
-					Role(mygoui.RoleImage).Label("Forward").Shrink(0)
-				if index == len(segments)-1 {
-					app.breadcrumb(c, noteName(segment), path.Dir(app.document.Path), true)
-				} else {
-					app.breadcrumb(c, segment, strings.Join(segments[:index+1], "/"), false)
+			if collapsed != "" {
+				mygoui.Text(c, "…").FontSize(11).FixedLineHeight(14).Size(9, 14).Shrink(0).
+					TextColor(c.Theme().TextMuted).Tooltip(collapsed)
+			}
+			for index, part := range parts {
+				if index > 0 || collapsed != "" {
+					breadcrumbSeparator(c)
 				}
+				app.breadcrumb(c, part)
 			}
 		})
 		if app.dirty() {
@@ -464,17 +469,36 @@ func (app *workspaceWindow) statusBar(c *mygoui.Context) {
 		Gap(12).Label("Document status")
 }
 
-func (app *workspaceWindow) breadcrumb(c *mygoui.Context, label, folder string, file bool) {
-	mygoui.ButtonBase(c).Height(18).Padding(0, 5).Gap(3).Label(label).Disabled(app.modalOpen).
-		OnClick(func() { app.revealFolder(folder) }).Children(func() {
-		if app.blackout {
-			if file {
-				chromeIconColor(c, "doc.text", 11, blackoutSourceHead)
-			} else {
-				chromeIconColor(c, "folder", 12, blackoutTitleInk)
+func breadcrumbSeparator(c *mygoui.Context) {
+	mygoui.Box(c).Size(4.5, 7.5).Center().Shrink(0).Role(mygoui.RoleImage).Label("Forward").
+		Children(func() { chromeIconColor(c, "chevron.right", 9, c.Theme().TextMuted) })
+}
+
+func (app *workspaceWindow) breadcrumb(c *mygoui.Context, part workspaceBreadcrumb) {
+	theme := c.Theme()
+	symbol, ink := "folder", theme.TextMuted
+	if part.file {
+		symbol, ink = "doc.text", theme.Accent
+	}
+	if app.blackout && !c.Preferences().HighContrast {
+		ink = blackoutTitleInk
+		if part.file {
+			ink = blackoutSourceHead
+		}
+	}
+	mygoui.ButtonBase(c.Key(part.target)).Height(14).Shrink(0).Gap(4).KeepFocus().
+		Label(part.label).Tooltip(part.target).Disabled(app.modalOpen || part.target == "").
+		OnClick(func() { mygo.Shell.ShowItemInFolder(part.target) }).Children(func() {
+		if part.home {
+			sfsymbols.Symbol(c, "house").Size(10).Natural().Color(ink).
+				Fallback(chromeIconFallbacks["folder"]).Role(mygoui.RoleNone).Margin(0, 1)
+		} else {
+			icon := chromeIconColor(c, symbol, 10, ink)
+			if !part.file {
+				icon.Margin(0, 1)
 			}
 		}
-		mygoui.Text(c, label).FontSize(11).SingleLine()
+		mygoui.Text(c, part.label).FontSize(11).FixedLineHeight(14).SingleLine().Role(mygoui.RoleNone)
 	})
 }
 
@@ -524,6 +548,9 @@ func (app *workspaceWindow) preview(c *mygoui.Context) {
 	}
 	if app.pdfPreview.enabled && app.previewDocumentType() != documentHTML {
 		app.pdfPreview.draw(c, app)
+	} else if app.showsStartPage() {
+		_, width := app.paneToolWidths(c)
+		app.drawStartPreview(c, width)
 	} else {
 		app.previewPane.draw(c, app)
 	}
@@ -545,12 +572,24 @@ func (app *workspaceWindow) setMode(mode int) {
 	if app.draft == nil || app.modalOpen {
 		return
 	}
+	previous := app.displayedMode()
+	remountSource := !app.multiFile.active && (previous == previewMode || previous == wysiwygMode) && (mode == sourceMode || mode == splitMode)
+	returnToSource := app.mode == previewMode && mode == sourceMode && app.maximizedPane == paneNotMaximized
 	app.wys.flush(app)
 	app.multiFile.active = false
 	app.multiFile.editing = nil
 	app.mode = mode
 	app.maximizedPane = paneNotMaximized
 	app.modeChanged()
+	if remountSource {
+		// EV-UI-325. Restore the initial Source position in the existing editor.
+		if returnToSource && app.pendingConceptExcerpt == "" && app.code != nil {
+			app.code.Select(0, 0)
+			app.code.SetScrollY(0)
+			app.focusVaultSearch = false
+		}
+		app.revealPendingVaultConceptSource()
+	}
 }
 
 func (app *workspaceWindow) toggleFocus() {
@@ -697,8 +736,13 @@ func (app *workspaceWindow) buildMenu() {
 		}},
 		{Label: app.tr("Help", "帮助"), Submenu: []*mygo.MenuItem{
 			{Label: applicationName + " " + app.tr("Help", "帮助"), Click: command(app.showFeatureGuide)},
+			{Label: app.userGuideTitle(), Click: command(func() { app.openUserGuide(0, false) })},
+			markdownSyntaxGuideMenuItem(app.interfaceLanguage()),
+			mygo.Separator(),
 			{Label: app.tr("Keyboard Shortcuts", "键盘快捷键"), Accelerator: "CmdOrCtrl+Shift+/", Click: command(app.showShortcuts)},
 			{Label: app.tr("Show Welcome", "显示欢迎页"), Click: command(app.showWelcome)},
+			mygo.Separator(),
+			app.application.replaySplashMenuItem(app.interfaceLanguage()),
 		}},
 	})
 	app.win.SetMenu(app.menu)

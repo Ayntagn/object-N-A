@@ -22,7 +22,7 @@ type workspaceGraph struct {
 	labels                  [2]*bool
 	sidebarInfo, windowInfo graphInfoPopover
 	tag, windowTag          string
-	highlight               map[string]bool
+	highlight               map[string]float64
 	layoutSource            *vaultindex.Graph
 	layout                  vaultindex.GraphLayout
 }

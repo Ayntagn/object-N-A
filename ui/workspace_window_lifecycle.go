@@ -2,6 +2,8 @@ package ui
 
 import (
 	"errors"
+	"log"
+	"runtime"
 	"slices"
 
 	"cyberwriter/internal/core/aiworkspace"
@@ -11,18 +13,23 @@ import (
 )
 
 type workspaceApplication struct {
-	preferences  workspacePreferences
-	aiHistory    *aiworkspace.History
-	windows      []*workspaceWindow
-	active       *workspaceWindow
-	welcome      workspaceWelcome
-	glow         workspaceGlowController
-	featureGuide workspaceFeatureGuide
-	stylesheet   workspaceStylesheet
-	pdfWindows   map[string]*workspacePDFWindow
-	imageWindows map[string]*workspaceImageWindow
-	quitSession  *savedSession
-	closeErr     error
+	preferences     workspacePreferences
+	aiHistory       *aiworkspace.History
+	aiVaultContexts map[string]*workspaceAIVaultContext
+	windows         []*workspaceWindow
+	active          *workspaceWindow
+	welcome         workspaceWelcome
+	splash          *workspaceSplash
+	glow            workspaceGlowController
+	featureGuide    workspaceFeatureGuide
+	stylesheet      workspaceStylesheet
+	pdfWindows      map[string]*workspacePDFWindow
+	imageWindows    map[string]*workspaceImageWindow
+	quitSession     *savedSession
+	closeErr        error
+	idlePicker      bool
+
+	deferredVaultOffers map[string]bool
 }
 
 func (a *workspaceApplication) newWindow(tab *workspaceTab, origin *workspaceWindow) *workspaceWindow {
@@ -47,6 +54,7 @@ func (a *workspaceApplication) newWindow(tab *workspaceTab, origin *workspaceWin
 		options.X, options.Y = bounds.X+29, bounds.Y+29
 		options.Width, options.Height = bounds.Width, bounds.Height
 		app.vault, app.root, app.entries = origin.vault, origin.root, origin.entries
+		app.vaultEmbeddingOfferPath = origin.vaultEmbeddingOfferPath
 		app.vaultTreeEntries = origin.vaultTreeEntries
 		app.vaultFileCount = origin.vaultFileCount
 		app.index.data = origin.index.data
@@ -65,6 +73,7 @@ func (a *workspaceApplication) newWindow(tab *workspaceTab, origin *workspaceWin
 	app.win.OnClosed(app.closeGraphWindow)
 	app.win.OnClosed(app.closePresentation)
 	app.win.OnClosed(app.ai.stopResponse)
+	app.win.OnClosed(app.ai.clearAIReferences)
 	app.win.OnClosed(func() { a.releaseWindow(app) })
 	app.win.OnFocus(func() { a.activate(app) })
 	app.refreshTemplateLibrary()
@@ -75,6 +84,8 @@ func (a *workspaceApplication) newWindow(tab *workspaceTab, origin *workspaceWin
 	app.activateTab(tab)
 	if app.vault != nil && app.index.data == nil {
 		app.requestIndex()
+	} else {
+		app.syncAIVaultContext()
 	}
 	app.startVaultWatch()
 	return app
@@ -83,6 +94,10 @@ func (a *workspaceApplication) newWindow(tab *workspaceTab, origin *workspaceWin
 func (a *workspaceApplication) activate(app *workspaceWindow) {
 	if app.win.IsDestroyed() {
 		return
+	}
+	if app.sidebarSearch.relatedRefreshDeferred {
+		app.sidebarSearch.relatedRefreshDeferred = false
+		app.win.Invalidate()
 	}
 	app.refreshTemplateLibrary()
 	if mygo.App.Menu() != app.menu {
@@ -132,7 +147,9 @@ func (a *workspaceApplication) releaseWindow(app *workspaceWindow) {
 		tab.cancelAPIRequests()
 		storages[tab.storage] = true
 	}
+	contextRoot := app.aiVaultContextRoot()
 	app.vault, app.tabs = nil, nil
+	app.detachAIVaultContext(contextRoot)
 	for storage := range storages {
 		a.closeErr = errors.Join(a.closeErr, app.closeUnusedVault(storage))
 	}
@@ -162,6 +179,9 @@ func (app *workspaceWindow) moveTabToNewWindow() {
 }
 
 func (a *workspaceApplication) installSessionLifecycle() {
+	if runtime.GOOS == "darwin" {
+		mygo.App.OnWindowAllClosed(a.installDocumentlessMenu)
+	}
 	mygo.App.OnBeforeQuit(func(_ *mygo.QuitEvent) {
 		a.quitSession = nil
 		if current := a.activeWorkspace(); current != nil {
@@ -175,6 +195,94 @@ func (a *workspaceApplication) installSessionLifecycle() {
 			a.closeErr = errors.Join(a.closeErr, a.preferences.write())
 		}
 	})
+}
+
+func (a *workspaceApplication) installDocumentlessMenu() {
+	language := a.preferences.InterfaceLanguage
+	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
+		{Role: mygo.RoleAppMenu, Submenu: []*mygo.MenuItem{{Role: mygo.RoleAbout}, {Role: mygo.RoleQuit}}},
+		{Label: "File", Submenu: []*mygo.MenuItem{
+			{Label: "New Document", Accelerator: "CmdOrCtrl+N", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.openDocumentlessWindow(func(app *workspaceWindow) {
+					app.newDocument()
+					app.initialEmptyTab = app.draft != nil && app.document.Path == ""
+				})
+			}},
+			{Label: "Open...", Accelerator: "CmdOrCtrl+O", Click: func(*mygo.MenuItem, *mygo.Window) { a.openDocumentlessPicker() }},
+		}},
+		{Label: language.text("Help", "帮助"), Submenu: []*mygo.MenuItem{
+			{Label: applicationName + " " + language.text("Help", "帮助"), Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.openFeatureGuide("", nil)
+			}},
+			{Label: applicationName + " " + language.text("User Guide", "用户指南"), Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.openDocumentlessWindow(func(app *workspaceWindow) {
+					app.setUserGuide(app.workspaceTab)
+					app.activateTab(app.workspaceTab)
+				})
+			}},
+			markdownSyntaxGuideMenuItem(language),
+			mygo.Separator(),
+			{Label: language.text("Keyboard Shortcuts", "键盘快捷键"), Disabled: true},
+			{Label: language.text("Show Welcome", "显示欢迎页"), Disabled: true},
+			mygo.Separator(),
+			a.replaySplashMenuItem(language),
+		}},
+	}))
+}
+
+func (a *workspaceApplication) openDocumentlessWindow(prepare func(*workspaceWindow)) {
+	mygo.RunOnMain(func() {
+		tab := &workspaceTab{mode: a.preferences.DefaultView}
+		app := a.newWindow(tab, nil)
+		if root := a.preferences.Session.Vault; root != "" {
+			app.openVault(root)
+		}
+		prepare(app)
+		app.win.Show()
+		a.activate(app)
+		app.persistSession()
+	})
+}
+
+func (a *workspaceApplication) openDocumentlessPicker() {
+	if app := a.activeWorkspace(); app != nil {
+		app.filePicker()
+		return
+	}
+	if a.idlePicker {
+		return
+	}
+	a.idlePicker = true
+	options := mygo.OpenDialogOptions{
+		Title: documentPickerTitle, DefaultPath: a.preferences.Session.Vault, Filters: []mygo.FileFilter{documentPickerFilter},
+	}
+	go func() {
+		files, err := mygo.Dialog.Open(options)
+		mygo.RunOnMain(func() {
+			a.idlePicker = false
+			if err != nil {
+				log.Printf("Open Document: %v", err)
+				return
+			}
+			if len(files) == 0 {
+				return
+			}
+			if app := a.activeWorkspace(); app != nil {
+				app.openPickedDocument(files[0], false)
+				return
+			}
+			a.openDocumentlessWindow(func(app *workspaceWindow) {
+				app.openPickedFile(files[0])
+				if app.draft == nil && app.drawing == nil {
+					problem := app.problem
+					app.setTabDocument(app.workspaceTab, workspace.Document{})
+					app.initialEmptyTab = true
+					app.activateTab(app.workspaceTab)
+					app.problem = problem
+				}
+			})
+		})
+	}()
 }
 
 func (a *workspaceApplication) restoreSession(primary *workspaceWindow, session savedSession) {

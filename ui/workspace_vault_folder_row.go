@@ -56,7 +56,8 @@ func orderedVaultTreeEntries(entries []workspace.Entry) []workspace.Entry {
 }
 
 func (app *workspaceWindow) drawVaultFileTree(c *mygoui.Context) {
-	tree := mygoui.TreeBase(c)
+	// Keep row identities in the same Vault as the active drag payload.
+	tree := mygoui.TreeBase(c.Key(app.root))
 	colors := app.vaultSectionColors(c)
 	tree.Root.Role(mygoui.RoleList).Label("Vault files").Disabled(app.modalOpen).Children(func() {
 		app.fileRows(c, tree, ".", app.defaultVaultFileTree(), colors)
@@ -80,8 +81,9 @@ func (app *workspaceWindow) folderRow(c *mygoui.Context, tree mygoui.TreeParts, 
 	c.Key(entry.Path)
 	item := tree.Item(open)
 	count := strconv.Itoa(countVaultFiles(entry.Children))
+	inset := vaultTreeRowInset(item.Depth())
 	row := item.Row.Role(mygoui.RoleButton).FillWidth().Height(24).
-		Padding(4, 12).PaddingStart(vaultTreeRowInset(item.Depth())).Gap(4).AlignItems(mygoui.Center).
+		Padding(4, 12).PaddingStart(inset).Gap(4).AlignItems(mygoui.Center).
 		Label(entry.Name + ", " + count).OnClick(func() { *open = !*open }).
 		ContextMenu(func(m *mygoui.Menu) {
 			if m.Item("New Document Here…").Chosen() {
@@ -122,7 +124,11 @@ func (app *workspaceWindow) folderRow(c *mygoui.Context, tree mygoui.TreeParts, 
 		mygoui.Text(c, count).Font("monospace").FontSize(11).FixedLineHeight(14).Shrink(0).
 			TextColor(countInk).Role(mygoui.RoleNone)
 	})
-	item.Group(func() {
+	group := item.Group(func() {
 		app.fileRows(c, tree, entry.Path, entry.Children, colors)
 	})
+	if len(entry.Children) == 0 {
+		group = mygoui.Element{}
+	}
+	app.vaultTreeDragRow(c, row, group, entry.Path, inset)
 }

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"log"
 	"runtime"
 	"slices"
 	"strings"
@@ -17,9 +18,24 @@ const (
 	featureGuideTopic   = 27
 )
 
+// EV-UI-328/332: the syntax guide is a Help menu action even without a document.
+func markdownSyntaxGuideMenuItem(language workspaceLanguage) *mygo.MenuItem {
+	return &mygo.MenuItem{
+		Label: language.text("Markdown Syntax Guide", "Markdown 语法指南"),
+		Click: func(*mygo.MenuItem, *mygo.Window) {
+			go func() {
+				const destination = "https://www.markdownguide.org/basic-syntax/"
+				if err := mygo.Shell.OpenExternal(destination); err != nil {
+					log.Printf("Open Markdown Syntax Guide: %v", err)
+				}
+			}()
+		},
+	}
+}
+
 type workspaceFeatureGuide struct {
 	win, returnTo *mygo.Window
-	workspace     *workspaceWindow
+	preferences   *workspacePreferences
 	query         string
 	selected      string
 	matches       []string
@@ -33,10 +49,13 @@ func (app *workspaceWindow) showFeatureGuide() {
 }
 
 func (app *workspaceWindow) openFeatureGuide(topic string, origin *mygo.Window) {
-	application := app.application
-	if application == nil || app.modalOpen {
+	if app.application == nil || app.modalOpen {
 		return
 	}
+	app.application.openFeatureGuide(topic, origin)
+}
+
+func (application *workspaceApplication) openFeatureGuide(topic string, origin *mygo.Window) {
 	guide := &application.featureGuide
 	if guide.win != nil && !guide.win.IsDestroyed() {
 		if featureGuideCards[topic] != nil {
@@ -53,14 +72,15 @@ func (app *workspaceWindow) openFeatureGuide(topic string, origin *mygo.Window) 
 		guide.win.Invalidate()
 		return
 	}
-	*guide = workspaceFeatureGuide{returnTo: origin, workspace: app}
+	*guide = workspaceFeatureGuide{returnTo: origin, preferences: &application.preferences}
 	guide.search("")
 	if featureGuideCards[topic] != nil {
 		guide.selectCard(topic)
 		guide.reveal = false
 	}
 	win := mygo.NewWindow(mygo.WindowOptions{
-		Title: app.tr("Feature Guide", "功能指南"), Width: featureGuideWidth, Height: featureGuideHeight, Hidden: true,
+		Title: guide.preferences.InterfaceLanguage.text("Feature Guide", "功能指南"),
+		Width: featureGuideWidth, Height: featureGuideHeight, Hidden: true,
 		TitleBarStyle: mygo.TitleBarHiddenInset, TitleBarHeight: 32,
 		TrafficLightPosition: &mygo.Point{X: 8, Y: 8},
 		DisableMinimize:      true, DisableMaximize: true, DisableFullScreen: true,
@@ -110,7 +130,7 @@ func (a *workspaceApplication) refreshHelpLanguage() {
 	guide := &a.featureGuide
 	if guide.win != nil && !guide.win.IsDestroyed() {
 		if runtime.GOOS != "darwin" {
-			guide.win.SetTitle(guide.workspace.tr("Feature Guide", "功能指南"))
+			guide.win.SetTitle(a.preferences.InterfaceLanguage.text("Feature Guide", "功能指南"))
 		}
 		guide.win.Invalidate()
 	}
@@ -191,7 +211,7 @@ func guideColors(c *mygoui.Context) featureGuideColors {
 func (guide *workspaceFeatureGuide) draw(c *mygoui.Context) {
 	applyWorkspaceTheme(c)
 	colors := guideColors(c)
-	language := guide.workspace.interfaceLanguage()
+	language := guide.preferences.InterfaceLanguage
 	closeGuide := func() { guide.win.Close() }
 	c.OnWindowShortcut(0, mygoui.KeyEscape, closeGuide)
 	c.OnWindowShortcut(mygoui.Cmd, mygoui.KeyW, closeGuide)
@@ -332,7 +352,7 @@ func (guide *workspaceFeatureGuide) drawDetail(c *mygoui.Context, colors feature
 					mygoui.Text(c, language.text("renders to", "渲染为")).FontSize(11).FontWeight(600).TextColor(colors.muted)
 				})
 				guideDetailLabel(c, language.text("YOU GET", "渲染结果"), colors)
-				guide.preview.draw(c, card, language, guide.workspace.activeCustomStylesheet())
+				guide.preview.draw(c, card, language, guide.preferences.activeCustomStylesheet())
 			}
 			if card.inApp || card.illustration != "" {
 				guideDetailLabel(c, language.text("IN THE APP", "在应用中"), colors)

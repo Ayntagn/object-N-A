@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -23,25 +24,42 @@ type workspaceAI struct {
 	conversationID       string
 	conversationDocument string
 	savedTurns           int
+	references           []workspaceAIReference
+	referenceLoad        *workspaceAIReferenceLoad
+	vaultContextOverride *bool
 }
 
 type aiComposerOptions struct {
-	model            string
-	send             func(string) bool
-	streamToEditor   bool
-	toggleWriteBack  func()
-	attachContext    func()
-	clearContext     func()
-	showContext      func(mygoui.Rect)
-	context          *workspaceAIContext
-	showHistory      func(mygoui.Rect)
-	showGuide        func(mygoui.Rect)
-	openFeatureGuide func()
-	rawText          bool
-	toggleRawText    func()
-	sidebarRight     bool
-	moveSidebar      func()
-	insertReply      func(string)
+	model              string
+	send               func(string) bool
+	streamToEditor     bool
+	toggleWriteBack    func()
+	attachContext      func()
+	pickReferences     func()
+	dropReferences     func([]string)
+	clearContext       func()
+	showContext        func(mygoui.Rect)
+	context            *workspaceAIContext
+	showHistory        func(mygoui.Rect)
+	showGuide          func(mygoui.Rect)
+	openFeatureGuide   func()
+	rawText            bool
+	toggleRawText      func()
+	sidebarRight       bool
+	moveSidebar        func()
+	insertReply        func(string)
+	buildVault         func()
+	toggleVault        func()
+	vaultEnabled       bool
+	vaultReady         bool
+	vaultChunkCount    int
+	vaultBusy          bool
+	vaultProblem       string
+	vaultProgress      string
+	vaultProgressValue float64
+	vaultUpdating      bool
+	cancelVaultBuild   func()
+	drawVaultAssets    func(*mygoui.Context, workspaceAIColors) bool
 }
 
 func (app *workspaceWindow) aiComposerOptions() aiComposerOptions {
@@ -65,6 +83,42 @@ func (app *workspaceWindow) aiComposerOptions() aiComposerOptions {
 		options.attachContext = app.attachAIContext
 		options.insertReply = app.insertAIReply
 	}
+	if !app.modalOpen {
+		options.dropReferences = app.dropAIReferences
+	}
+	if !app.modalOpen && app.ai.referenceLoad == nil {
+		options.pickReferences = app.pickAIReferences
+	} else if app.ai.referenceLoad != nil {
+		options.send = nil
+	}
+	if state := app.aiVaultContextState(); state != nil {
+		options.vaultReady = state.index != nil
+		options.vaultBusy, options.vaultProblem = state.request != nil, state.problem
+		options.vaultEnabled = options.vaultReady && app.aiUsesVaultContext()
+		if state.request != nil && state.request.kind == aiVaultBuild {
+			options.vaultUpdating = state.request.automatic
+			if !options.vaultUpdating {
+				options.vaultProgress, options.vaultProgressValue = aiVaultBuildProgressStatus(state.request.progress, languageEnglish)
+				if !app.modalOpen {
+					options.cancelVaultBuild = app.cancelAIVaultContextBuild
+				}
+			}
+		}
+		if options.vaultEnabled {
+			options.vaultChunkCount = state.index.ChunkCount()
+		}
+		if state.assetsMissing || state.request != nil && state.request.kind == aiVaultDownload {
+			options.drawVaultAssets = func(c *mygoui.Context, colors workspaceAIColors) bool {
+				return app.drawVaultEmbeddingAssetsCard(c, colors, state)
+			}
+		}
+		if !app.modalOpen {
+			options.buildVault = app.openAIVaultBuildSheet
+			if options.vaultReady {
+				options.toggleVault = app.toggleAIUseVault
+			}
+		}
+	}
 	return options
 }
 
@@ -85,6 +139,9 @@ type workspaceAIColors struct {
 	text, muted, accent, accentText, link mygoui.Color
 	border, fill, guide, prompt, message  mygoui.Color
 	warning, warningInk, settings         mygoui.Color
+	suggestionFill, suggestionBorder      mygoui.Color
+	vaultDisabledInk, vaultDisabledBorder mygoui.Color
+	vaultControlInk                       mygoui.Color
 }
 
 func aiWorkspaceColors(c *mygoui.Context, blackout bool) workspaceAIColors {
@@ -95,12 +152,19 @@ func aiWorkspaceColors(c *mygoui.Context, blackout bool) workspaceAIColors {
 			accentText: mygoui.Hex("#351136"), link: mygoui.Hex("#a9c7ff"), border: mygoui.Hex("#4a314b"),
 			fill: mygoui.Hex("#18101a"), guide: mygoui.Hex("#0c0c10"), prompt: mygoui.Hex("#18181c"), message: mygoui.Hex("#161a26"),
 			warning: mygoui.Hex("#170d08"), warningInk: mygoui.Hex("#ff992e"), settings: mygoui.Hex("#2b272a"),
+			suggestionFill: mygoui.Hex("#0e141d"), suggestionBorder: mygoui.Hex("#1e1b29"),
+			// MyGo halves the disabled paint opacity. These composite to the sampled
+			// #6f6f77 text and #2e2e32 stroke over the composer surface.
+			vaultDisabledInk: mygoui.Hex("#c6c6d2"), vaultDisabledBorder: mygoui.Hex("#444448"),
+			vaultControlInk: mygoui.Hex("#c4c6d0"),
 		}
 	}
 	return workspaceAIColors{
 		text: t.Text, muted: t.TextMuted, accent: t.Accent, accentText: t.AccentText, link: t.Accent,
 		border: t.Border, fill: t.Accent.Alpha(0.09), guide: t.Surface, prompt: t.Surface, message: t.Accent.Alpha(0.12),
 		warning: t.Danger.Alpha(0.09), warningInk: t.Danger, settings: t.SurfacePressed,
+		suggestionFill: t.Accent.Alpha(0.09), suggestionBorder: t.Border,
+		vaultDisabledInk: t.TextMuted, vaultDisabledBorder: t.TextMuted.Alpha(0.25), vaultControlInk: t.Text,
 	}
 }
 
@@ -164,6 +228,7 @@ func (s *workspaceAI) draw(c *mygoui.Context, blackout bool, drawTabs, openSetti
 	}
 	s.drawAIConversation(c, colors, openSettings, composer)
 	drawAIContext(c, colors, composer)
+	s.drawAIReferences(c, colors)
 	s.drawAIComposer(c, colors, composer)
 }
 
@@ -198,7 +263,7 @@ func (s *workspaceAI) drawAIConversation(c *mygoui.Context, colors workspaceAICo
 		Label("AI Conversation").TrackScroll(&s.scroll)
 	if len(s.submitted) == 0 {
 		conversation.Padding(20, 24).Children(func() {
-			drawAIWorkspaceGuide(c, colors, openSettings, composer.openFeatureGuide)
+			s.drawAIWorkspaceGuide(c, colors, openSettings, composer)
 		})
 		return
 	}
@@ -263,6 +328,15 @@ func (s *workspaceAI) drawAIReply(c *mygoui.Context, colors workspaceAIColors, t
 			mygoui.Text(c, turn.problem).FillWidth().FontSize(13).FixedLineHeight(17).TextColor(colors.warningInk).
 				Role(mygoui.RoleAlert)
 		}
+		if !running && turn.reply != "" && turn.metrics.TokensPerSecond > 0 {
+			// EV-UI-257/258. Each reply keeps its metrics beneath either text representation.
+			mygoui.Row(c.Key("AI reply metrics")).Height(11).Gap(8).AlignItems(mygoui.Center).Children(func() {
+				mygoui.Text(c, fmt.Sprintf("%.1f tok/s", turn.metrics.TokensPerSecond)).
+					Font("monospace").FontSize(9.5).FixedLineHeight(11).SingleLine().TextColor(colors.muted)
+				mygoui.Text(c, fmt.Sprintf("%.2fs", turn.metrics.TimeToFirstToken.Seconds())).
+					Font("monospace").FontSize(9.5).FixedLineHeight(11).SingleLine().TextColor(colors.muted)
+			})
+		}
 		if latest {
 			// EV-UI-231/242. Actions are attached to the newest available reply.
 			mygoui.Row(c.Key("AI reply actions")).FillWidth().Height(22).Padding(0, 5.5, 0, 4).
@@ -285,8 +359,8 @@ func (s *workspaceAI) drawAIReply(c *mygoui.Context, colors workspaceAIColors, t
 	})
 }
 
-// EV-UI-225 / EV-UI-245. The guide is the same in an empty chat with or without a model.
-func drawAIWorkspaceGuide(c *mygoui.Context, colors workspaceAIColors, openSettings, openFeatureGuide func()) {
+// EV-UI-225 / EV-UI-245 / EV-UI-277. Suggestions prefill the prompt in any empty chat.
+func (s *workspaceAI) drawAIWorkspaceGuide(c *mygoui.Context, colors workspaceAIColors, openSettings func(), composer aiComposerOptions) {
 	mygoui.Column(c).FillWidth().AlignItems(mygoui.Center).Gap(16).Children(func() {
 		mygoui.Column(c).AlignItems(mygoui.Center).Gap(4).Children(func() {
 			aiGuideIcon(c, "sparkles", "", "Sparkle", 32, colors.accent)
@@ -297,13 +371,16 @@ func drawAIWorkspaceGuide(c *mygoui.Context, colors workspaceAIColors, openSetti
 			for _, prompt := range [...]string{
 				"Summarize this note", "Improve this paragraph", "Diagram this as a flowchart", "Turn this into a table",
 			} {
-				mygoui.ButtonBase(c.Key(prompt)).Height(25).Padding(0, 12).Center().Radius(12).Label(prompt).Disabled(true).
-					Border(1, colors.border).Background(colors.link.Alpha(0.09)).Children(func() {
+				mygoui.ButtonBase(c.Key(prompt)).Height(25).Padding(0, 12).Center().Radius(12).Label(prompt).KeepFocus().
+					OnClick(func() { s.prompt = prompt }).
+					Border(1, colors.suggestionBorder).Background(colors.suggestionFill).Children(func() {
 					mygoui.Text(c, prompt).FontSize(13).TextColor(colors.text).Role(mygoui.RoleNone)
 				})
 			}
 		})
-		drawAIVaultGuide(c, colors)
+		if !composer.vaultReady || composer.drawVaultAssets != nil || composer.vaultProgress != "" || composer.vaultUpdating {
+			drawAIVaultGuide(c, colors, composer)
+		}
 		drawAIControlsGuide(c, colors)
 		mygoui.Column(c).FillWidth().AlignItems(mygoui.Center).Gap(5).Children(func() {
 			mygoui.Text(c, "Sends your selection, or the whole note if nothing is selected.").
@@ -311,7 +388,7 @@ func drawAIWorkspaceGuide(c *mygoui.Context, colors workspaceAIColors, openSetti
 			mygoui.Text(c, commandPaletteShortcut("⌘J")+" runs quick actions on selected text.").
 				TextAlign(mygoui.Center).FontSize(12).FixedLineHeight(15).TextColor(colors.muted)
 			mygoui.Row(c).Margin(10, 0, 0).Gap(12).AlignItems(mygoui.Center).Children(func() {
-				aiWorkspaceLink(c, "Open the guide", colors.accent, openFeatureGuide)
+				aiWorkspaceLink(c, "Open the guide", colors.accent, composer.openFeatureGuide)
 				mygoui.Text(c, "·").FontSize(12).TextColor(colors.muted).Role(mygoui.RoleNone)
 				aiWorkspaceLink(c, "AI Settings", colors.accent, openSettings)
 			})
@@ -325,7 +402,7 @@ func aiWorkspaceLink(c *mygoui.Context, label string, color mygoui.Color, action
 	})
 }
 
-func drawAIVaultGuide(c *mygoui.Context, colors workspaceAIColors) {
+func drawAIVaultGuide(c *mygoui.Context, colors workspaceAIColors, composer aiComposerOptions) {
 	mygoui.Column(c.Key("AI Vault guide")).FillWidth().Padding(12, 11).Gap(9).Radius(8).
 		Background(colors.fill).Border(1, colors.border).Children(func() {
 		mygoui.Row(c).Gap(8).AlignItems(mygoui.Center).Children(func() {
@@ -339,14 +416,51 @@ func drawAIVaultGuide(c *mygoui.Context, colors workspaceAIColors) {
 			FontSize(12).FixedLineHeight(14).TextColor(colors.text)
 		mygoui.Row(c).Gap(7).AlignItems(mygoui.Start).Children(func() {
 			aiGuideIcon(c, "lock.shield", "questionmark.circle", "Padlock In A Shield", 11, colors.muted)
-			mygoui.Text(c, "Embeddings stay on your Mac; only the retrieved snippet text is sent to the AI").
+			mygoui.Text(c, "The index stays on this device. Relevant excerpts are sent with your message.").
 				Grow(1).MinWidth(0).FontSize(11).FixedLineHeight(14).TextColor(colors.text)
 		})
+		if composer.drawVaultAssets != nil && composer.drawVaultAssets(c, colors) {
+			return
+		}
+		if composer.vaultProblem != "" {
+			mygoui.Text(c, composer.vaultProblem).FontSize(11).TextColor(colors.warningInk).Wrap().Role(mygoui.RoleAlert)
+		}
+		if composer.vaultUpdating {
+			mygoui.Text(c, "Updating AI index…").FontSize(11).Margin(2, 0, 0).TextColor(colors.vaultControlInk.Alpha(0.7)).Role(mygoui.RoleStatus)
+			return
+		}
+		if composer.vaultProgress != "" {
+			drawAIVaultGuideProgress(c, colors, composer)
+			return
+		}
+		label := "Build Vault Embeddings"
+		if composer.vaultBusy {
+			label = "Preparing Vault Index…"
+		}
 		mygoui.ButtonBase(c).Height(28.5).FillWidth().Margin(2, 0, 0).Center().Gap(6).Radius(6).Background(colors.accent).
-			Label("Build Vault Embeddings").Disabled(true).Children(func() {
+			Label(label).Busy(composer.vaultBusy).Disabled(composer.buildVault == nil || composer.vaultBusy).
+			OnClick(composer.buildVault).Children(func() {
 			aiWorkspaceIcon(c, "sparkles", "", 13, colors.accentText)
-			mygoui.Text(c, "Build Vault Embeddings").FontSize(11).FontWeight(650).TextColor(colors.accentText).Role(mygoui.RoleNone)
+			mygoui.Text(c, label).FontSize(11).FontWeight(650).TextColor(colors.accentText).Role(mygoui.RoleNone)
 		})
+	})
+}
+
+// EV-UI-308. The AI card offers the same cancellation as Settings.
+func drawAIVaultGuideProgress(c *mygoui.Context, colors workspaceAIColors, composer aiComposerOptions) {
+	const cancel = "Cancel indexing"
+	mygoui.Column(c.Key("AI guide Vault progress")).FillWidth().Gap(6).Children(func() {
+		mygoui.Row(c).FillWidth().Gap(6).AlignItems(mygoui.Center).Children(func() {
+			mygoui.Text(c, composer.vaultProgress).FontSize(11).FontWeight(500).
+				MinWidth(0).Shrink(1).TextColor(colors.text).Wrap().Role(mygoui.RoleStatus)
+			mygoui.Spacer(c)
+			mygoui.ButtonBase(c.Key(cancel)).Size(17, 17).Center().KeepFocus().Shrink(0).
+				Label(cancel).Tooltip(cancel).Disabled(composer.cancelVaultBuild == nil).
+				OnClick(composer.cancelVaultBuild).Children(func() {
+				aiWorkspaceIcon(c, "xmark.circle.fill", "xmark", 13, colors.vaultControlInk.Alpha(0.6))
+			})
+		})
+		mygoui.Progress(c, composer.vaultProgressValue).FillWidth().Height(4).Label(composer.vaultProgress)
 	})
 }
 
@@ -434,13 +548,15 @@ func drawAIContext(c *mygoui.Context, colors workspaceAIColors, composer aiCompo
 }
 
 func (s *workspaceAI) drawAIComposer(c *mygoui.Context, colors workspaceAIColors, composer aiComposerOptions) {
-	const inset = 16
+	const inset, radius = 16, 11
 	placeholder := "Ask Not configured..."
 	if composer.model != "" {
 		placeholder = "Ask " + composer.model + "..."
 	}
-	mygoui.Column(c.Key("AI composer")).Width(vaultPanelWidth-2*inset).Height(66).Shrink(0).Margin(4, inset, 12).Padding(11, 7, 7).
-		Gap(4).Radius(11).Background(colors.prompt).Border(1, colors.border).Children(func() {
+	card := mygoui.Column(c.Key("AI composer")).Width(vaultPanelWidth-2*inset).Height(66).Shrink(0).Margin(4, inset, 12).Padding(11, 7, 7).
+		Gap(4).Radius(radius).Background(colors.prompt).Border(1, colors.border)
+	aiComposerReferenceDrop(card, radius, colors.link, composer.dropReferences)
+	card.Children(func() {
 		mygoui.TextAreaBase(c.Key("AI prompt"), &s.prompt).FillWidth().Height(20).Padding(0, 6).FontSize(14).
 			Label("AI prompt").Placeholder(placeholder).TextColor(colors.text).OnTextKey(func(key mygoui.TextKey) bool {
 			if key.Mods != 0 || key.Key != mygoui.KeyEnter || composer.send == nil || composer.model == "" {
@@ -452,26 +568,19 @@ func (s *workspaceAI) drawAIComposer(c *mygoui.Context, colors workspaceAIColors
 			return true
 		})
 		mygoui.Row(c).Height(22).Gap(5).AlignItems(mygoui.Center).Children(func() {
-			for i, control := range [...]struct {
+			for _, control := range [...]struct {
 				symbol, fallback, label string
 				action                  func()
 			}{
 				{"doc.viewfinder", "doc.text", "Attach current note", composer.attachContext},
-				{"paperclip", "doc.on.doc", "Attachments", nil},
-				{"rectangle.stack", "rectangle.on.rectangle", "Vault", nil},
+				{"paperclip", "doc.on.doc", "Attachments", composer.pickReferences},
 			} {
-				button := mygoui.ButtonBase(c.Key(control.label)).Size(22, 22).Center().KeepFocus().
-					Label(control.label).Disabled(control.action == nil).OnClick(control.action)
-				if i == 2 {
-					button.Size(59.5, 21).MarginStart(4.5).Gap(3).Border(1, colors.muted.Alpha(0.33)).Radius(6)
-				}
-				button.Children(func() {
+				mygoui.ButtonBase(c.Key(control.label)).Size(22, 22).Center().KeepFocus().
+					Label(control.label).Disabled(control.action == nil).OnClick(control.action).Children(func() {
 					aiWorkspaceIcon(c, control.symbol, control.fallback, 14, colors.text)
-					if i == 2 {
-						mygoui.Text(c, "Vault").FontSize(11).TextColor(colors.muted).Role(mygoui.RoleNone)
-					}
 				})
 			}
+			drawAIComposerVault(c, colors, composer)
 			// EV-UI-231. Chat-only and streaming share this button's position.
 			modeSymbol, modeFallback, modeLabel, modeInk := "text.append", "arrow.down.to.line", "Chat only", colors.text
 			if composer.streamToEditor {
@@ -512,5 +621,29 @@ func (s *workspaceAI) drawAIComposer(c *mygoui.Context, colors workspaceAIColors
 				aiWorkspaceIcon(c, "arrow.up", "textformat.size.larger", 12, ink)
 			})
 		})
+	})
+}
+
+// EV-UI-306: the selected title shows the number of chunks in the published index.
+func drawAIComposerVault(c *mygoui.Context, colors workspaceAIColors, composer aiComposerOptions) {
+	caption := "Vault"
+	tooltip := "Build vault embeddings in AI Settings to enable"
+	ink, border := colors.vaultDisabledInk, colors.vaultDisabledBorder
+	button := mygoui.ButtonBase(c.Key("Vault")).Height(21).MinWidth(59.5).Shrink(0).MarginStart(4.5).
+		Padding(0, 7).Gap(4).Radius(5).Center().KeepFocus().Label("Vault").
+		Disabled(composer.toggleVault == nil).AccessSelected(composer.vaultEnabled).OnClick(composer.toggleVault)
+	if composer.vaultEnabled {
+		caption += " · " + strconv.Itoa(composer.vaultChunkCount)
+		tooltip = "Vault context will be sent with each message (click to disable for this chat)"
+		ink, border = colors.accent, colors.accent.Alpha(0)
+		button.Background(colors.accent.Alpha(0.12))
+	} else if composer.vaultReady {
+		tooltip = "Click to send vault context with each message in this chat"
+		ink, border = colors.muted, colors.muted.Alpha(0.25)
+	}
+	button.Tooltip(tooltip).Border(1, border).Children(func() {
+		// MyGo's symbol box includes the glyph's internal whitespace.
+		aiWorkspaceIcon(c, "rectangle.stack", "rectangle.on.rectangle", 14, ink)
+		mygoui.Text(c, caption).FontSize(10).FontWeight(500).SingleLine().TextColor(ink).Role(mygoui.RoleNone)
 	})
 }

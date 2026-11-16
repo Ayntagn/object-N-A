@@ -72,7 +72,11 @@ func readCustomStylesheet(file string) (string, error) {
 }
 
 func (app *workspaceWindow) activeCustomStylesheet() string {
-	if app.preferences == nil || !app.preferences.UserStylesheetEnabled {
+	return app.preferences.activeCustomStylesheet()
+}
+
+func (prefs *workspacePreferences) activeCustomStylesheet() string {
+	if prefs == nil || !prefs.UserStylesheetEnabled {
 		return ""
 	}
 	file, err := customStylesheetPath()

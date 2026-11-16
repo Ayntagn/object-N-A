@@ -51,13 +51,9 @@ func renderStandaloneHTML(doc exportDocument, mode standaloneHTMLMode, figureCou
 		if figureCounter != nil {
 			figures.counter = *figureCounter
 		}
-		codeTheme := "atom-one-light"
-		if theme.dark() {
-			codeTheme = "night-owl"
-		}
 		markup := previewMarkup{
 			doc: parser.New(webPreviewExtensions), resources: doc.origin.resources(), relative: doc.origin.note,
-			charts: true, figures: &figures, standalone: mode, codeTheme: sourceThemeForID(codeTheme).palette,
+			charts: true, figures: &figures, standalone: mode, codeTheme: previewCodeTheme(theme.dark()),
 			htmlBlocks:    doc.kind == documentMarkdown || doc.kind == documentUndetermined,
 			liveAPIFences: doc.kind == documentMarkdown || doc.kind == documentUndetermined,
 		}
@@ -194,30 +190,49 @@ func (m *previewMarkup) markdownImageSource(destination string) string {
 
 func (m *previewMarkup) writeHighlightedFence(language, anchor, source string) bool {
 	language = strings.ToLower(language)
-	lexer := editor.LanguageNamed(language)
-	if lexer == nil || lexer.Tokenizer == nil {
-		return false
+	lexer := nativeFenceTokenizer(language)
+	source = strings.TrimSuffix(source, "\n")
+	var additional []editor.Token
+	if lexer == nil {
+		fallback := additionalFenceLexer(language)
+		if fallback == nil {
+			return false
+		}
+		additional = tokenizeAdditionalFence(fallback, source)
+		if len(additional) == 0 {
+			return false
+		}
 	}
 	attr := html.EscapeString(language)
 	fmt.Fprintf(&m.out, `<pre%s><code class="hljs language-%s" data-language="%s">`, anchor, attr, attr)
-	var tokens []editor.Token
-	var state uint64
-	for i, line := range strings.Split(strings.TrimSuffix(source, "\n"), "\n") {
-		if i > 0 {
-			m.out.WriteByte('\n')
-		}
-		tokens, state = lexer.Tokenizer.Tokenize(line, state, tokens[:0])
+	if lexer == nil {
 		start := 0
-		for _, token := range tokens {
-			color := m.codeTheme.Tokens[token.Kind].Color
-			if token.Kind == editor.TokenText || token.Kind == editor.TokenVariable {
-				color = m.codeTheme.Text
-			}
+		for _, run := range additional {
+			color := m.codeTheme.TokenColor(run.Kind)
 			fmt.Fprintf(&m.out, `<span style="color:#%02x%02x%02x">%s</span>`, color.R, color.G, color.B,
-				html.EscapeString(line[start:token.End]))
-			start = token.End
+				html.EscapeString(source[start:run.End]))
+			start = run.End
 		}
-		m.out.WriteString(html.EscapeString(line[start:]))
+	} else {
+		var tokens []editor.Token
+		var state uint64
+		for i, line := range strings.Split(source, "\n") {
+			if i > 0 {
+				m.out.WriteByte('\n')
+			}
+			tokens, state = lexer.Tokenize(line, state, tokens[:0])
+			start := 0
+			for _, token := range tokens {
+				color := m.codeTheme.Tokens[token.Kind].Color
+				if token.Kind == editor.TokenText || token.Kind == editor.TokenVariable {
+					color = m.codeTheme.Text
+				}
+				fmt.Fprintf(&m.out, `<span style="color:#%02x%02x%02x">%s</span>`, color.R, color.G, color.B,
+					html.EscapeString(line[start:token.End]))
+				start = token.End
+			}
+			m.out.WriteString(html.EscapeString(line[start:]))
+		}
 	}
 	m.out.WriteString("</code></pre>")
 	return true

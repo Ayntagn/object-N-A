@@ -10,7 +10,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -309,18 +311,69 @@ func (v *Vault) lifecycleDirectory(native string, create bool) error {
 	return nil
 }
 
-func (v *Vault) writeNewLifecycleFile(native, content string, mode fs.FileMode) (err error) {
-	staged, err := stageLifecycleFile(v.root, filepath.Dir(native), strings.NewReader(content), mode, time.Time{})
+func (v *Vault) writeNewLifecycleFile(native, content string, mode fs.FileMode) error {
+	dir, err := openVaultDirectory(v.root, filepath.Dir(native))
 	if err != nil {
 		return err
 	}
-	defer func() {
-		cleanupErr := v.root.Remove(staged)
-		if err != nil {
-			err = errors.Join(err, cleanupErr)
+	defer dir.Close()
+	parent, err := dir.Open(".")
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	staged, err := stageLifecycleFile(dir, ".", strings.NewReader(content), mode, time.Time{})
+	if err != nil {
+		return err
+	}
+
+	name := filepath.Base(native)
+	err = renameEntry(parent, staged, parent, name)
+	if err == nil {
+		return nil
+	}
+	// Linux can return EINVAL when the filesystem does not support the
+	// fixed RENAME_NOREPLACE flag. Both paths here are sibling basenames.
+	renameUnsupported := unsupportedLifecycleCommit(err) || (runtime.GOOS == "linux" && errors.Is(err, syscall.EINVAL))
+	if renameUnsupported {
+		err = dir.Link(staged, name)
+		if unsupportedLifecycleCommit(err) {
+			err = writeExclusiveLifecycleFile(dir, name, strings.NewReader(content), mode)
 		}
-	}()
-	return v.root.Link(staged, native)
+	} else {
+		err = &os.LinkError{Op: "rename", Old: staged, New: name, Err: err}
+	}
+	cleanupErr := dir.Remove(staged)
+	if err != nil {
+		return errors.Join(err, cleanupErr)
+	}
+	return nil
+}
+
+// Filesystems without either atomic publishing operation still reserve the
+// final name exclusively. On failure, remove it only if it still identifies
+// the file created here.
+func writeExclusiveLifecycleFile(dir *os.Root, name string, content io.Reader, mode fs.FileMode) error {
+	file, err := dir.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	created, identityErr := file.Stat()
+	err = writeAndCloseLifecycleFile(file, content, mode)
+	if err == nil {
+		return nil
+	}
+	if identityErr != nil {
+		return errors.Join(err, identityErr)
+	}
+	current, cleanupErr := dir.Lstat(name)
+	if cleanupErr == nil && os.SameFile(created, current) {
+		cleanupErr = dir.Remove(name)
+	}
+	if errors.Is(cleanupErr, fs.ErrNotExist) {
+		return err
+	}
+	return errors.Join(err, cleanupErr)
 }
 
 func stageLifecycleFile(dir *os.Root, parent string, content io.Reader, mode fs.FileMode, modified time.Time) (_ string, err error) {
@@ -334,14 +387,7 @@ func stageLifecycleFile(dir *os.Root, parent string, content io.Reader, mode fs.
 			err = errors.Join(err, dir.Remove(staged))
 		}
 	}()
-	_, writeErr := io.Copy(file, content)
-	if writeErr == nil {
-		writeErr = file.Chmod(mode)
-	}
-	if writeErr == nil {
-		writeErr = file.Sync()
-	}
-	if err := errors.Join(writeErr, file.Close()); err != nil {
+	if err := writeAndCloseLifecycleFile(file, content, mode); err != nil {
 		return "", err
 	}
 	if !modified.IsZero() {
@@ -350,6 +396,17 @@ func stageLifecycleFile(dir *os.Root, parent string, content io.Reader, mode fs.
 		}
 	}
 	return staged, nil
+}
+
+func writeAndCloseLifecycleFile(file *os.File, content io.Reader, mode fs.FileMode) error {
+	_, err := io.Copy(file, content)
+	if err == nil {
+		err = file.Chmod(mode)
+	}
+	if err == nil {
+		err = file.Sync()
+	}
+	return errors.Join(err, file.Close())
 }
 
 // Move through a private directory so removing the source pathname cannot

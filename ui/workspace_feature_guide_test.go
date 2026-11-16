@@ -49,7 +49,7 @@ func TestFeatureGuideSearch(t *testing.T) {
 func TestHelpViewsUseSelectedLanguage(t *testing.T) {
 	t.Setenv("CYBERWRITER_CONFIG_DIR", t.TempDir())
 	app := &workspaceWindow{preferences: &workspacePreferences{}}
-	guide := workspaceFeatureGuide{workspace: app}
+	guide := workspaceFeatureGuide{preferences: app.preferences}
 	guide.search("")
 	features := mygoui.NewTester(guide.draw, featureGuideWidth, featureGuideHeight)
 	if err := features.Click("Search features"); err != nil {

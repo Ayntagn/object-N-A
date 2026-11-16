@@ -38,7 +38,10 @@ func (app *workspaceWindow) setTabDocument(tab *workspaceTab, doc workspace.Docu
 	tab.document = doc
 	app.reconcileAIContextDocument(tab)
 	tab.templateTitle = ""
+	tab.initialEmptyTab = false
+	tab.startTitleFromSource = false
 	tab.inspection = false
+	tab.userGuide = false
 	tab.largePreview = workspaceLargePreview{}
 	tab.draft = editor.NewBuffer(doc.Text)
 	tab.code = app.newSourceEditor(tab)
@@ -51,6 +54,8 @@ func (app *workspaceWindow) setTabDocument(tab *workspaceTab, doc workspace.Docu
 	tab.maximizedPane = paneNotMaximized
 	tab.outlineCache = outlineCache{}
 	tab.previewAnchor = ""
+	tab.previewRevealLine = 0
+	tab.pendingConceptExcerpt = ""
 	tab.previewThemeID = normalizedPreviewThemeID(app.preferences.PreviewThemeID)
 	tab.quickPDFStylesheet = app.activeCustomStylesheet()
 	tab.quickPDFNumberFigures, tab.quickPDFFigureCounter = app.preferences.NumberFigures, 0
@@ -126,6 +131,7 @@ func (app *workspaceWindow) newTab() {
 		return
 	}
 	tab := app.blankTab()
+	app.setTabDocument(tab, workspace.Document{})
 	app.tabs = append(app.tabs, tab)
 	app.activateTab(tab)
 }
@@ -147,11 +153,15 @@ func (app *workspaceWindow) openNote(relativePath string, newTab bool) {
 }
 
 func (app *workspaceWindow) openVaultRow(relativePath string, newTab bool) {
+	app.openVaultRowFollowing(relativePath, newTab, nil)
+}
+
+func (app *workspaceWindow) openVaultRowFollowing(relativePath string, newTab bool, opened func()) {
 	if app.modalOpen || app.vault == nil {
 		return
 	}
 	if app.multiFile.active {
-		app.openNoteAt(relativePath, true, "")
+		app.openNoteWithFocus(relativePath, true, "", false, opened)
 		return
 	}
 	if workspace.IsPDFPath(relativePath) {
@@ -168,17 +178,17 @@ func (app *workspaceWindow) openVaultRow(relativePath string, newTab bool) {
 	}
 	if workspace.IsMarkdownPath(relativePath) || workspace.IsSourceTextPath(relativePath) {
 		keepSearchFocus := !newTab && vaultindex.TrimSidebarSearchQuery(app.fileSearch) != ""
-		app.openNoteWithFocus(relativePath, newTab, "", keepSearchFocus)
+		app.openNoteWithFocus(relativePath, newTab, "", keepSearchFocus, opened)
 		return
 	}
 	app.openVaultFileInDefaultApp(relativePath)
 }
 
 func (app *workspaceWindow) openNoteAt(relativePath string, newTab bool, anchor string) {
-	app.openNoteWithFocus(relativePath, newTab, anchor, false)
+	app.openNoteWithFocus(relativePath, newTab, anchor, false, nil)
 }
 
-func (app *workspaceWindow) openNoteWithFocus(relativePath string, newTab bool, anchor string, keepSearchFocus bool) {
+func (app *workspaceWindow) openNoteWithFocus(relativePath string, newTab bool, anchor string, keepSearchFocus bool, opened func()) {
 	if app.modalOpen || app.vault == nil {
 		return
 	}
@@ -189,19 +199,22 @@ func (app *workspaceWindow) openNoteWithFocus(relativePath string, newTab bool, 
 		}
 		newTab = app.draft != nil || app.drawing != nil
 	}
-	focusSearch := func() {
+	reveal := func() {
 		if keepSearchFocus && app.vaultVisible && !app.showingProperties() && vaultindex.TrimSidebarSearchQuery(app.fileSearch) != "" {
 			app.focusSource = false
 			app.wys.focus = false
 			app.focusVaultSearch = true
+		}
+		app.followPreviewAnchor(anchor)
+		if opened != nil {
+			opened()
 		}
 	}
 	if tab := app.findVaultTab(relativePath); tab != nil {
 		if tab != app.workspaceTab {
 			app.activateTab(tab)
 		}
-		focusSearch()
-		app.followPreviewAnchor(anchor)
+		reveal()
 		return
 	}
 	load := func() {
@@ -221,8 +234,7 @@ func (app *workspaceWindow) openNoteWithFocus(relativePath string, newTab bool, 
 			tab.mode = splitMode
 		}
 		app.activateTab(tab)
-		focusSearch()
-		app.followPreviewAnchor(anchor)
+		reveal()
 	}
 	if newTab {
 		load()

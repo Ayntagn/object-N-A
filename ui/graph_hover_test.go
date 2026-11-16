@@ -21,7 +21,7 @@ func TestGraphHoverShowsOnlyDirectConnections(t *testing.T) {
 	}
 	var host workspaceGraph
 	canvas := &host.floating
-	options := graphCanvasOptions{ActivePath: "Active.md", Lines: true, Highlight: map[string]bool{"Search.md": true}}
+	options := graphCanvasOptions{ActivePath: "Active.md", Lines: true, Highlight: map[string]float64{"Search.md": 1}}
 	tester := mygoui.NewTester(func(c *mygoui.Context) {
 		theme := *mygoui.DarkTheme()
 		theme.Background = mygoui.RGB(0, 0, 0)

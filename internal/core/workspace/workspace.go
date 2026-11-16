@@ -37,6 +37,9 @@ type Entry struct {
 // ModTime returns the modification time captured when the Vault was listed.
 func (entry Entry) ModTime() time.Time { return entry.modified }
 
+// Size is the file size captured when the Vault was listed.
+func (entry Entry) Size() int64 { return entry.size }
+
 type Document struct {
 	Path string
 	Text string

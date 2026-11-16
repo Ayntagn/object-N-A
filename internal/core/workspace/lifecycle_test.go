@@ -11,6 +11,35 @@ import (
 	"cyberwriter/internal/core/workspace"
 )
 
+// regression: creating a Vault note on a volume without hard links.
+func TestCreateVaultNotePublishesInParent(t *testing.T) {
+	dir := t.TempDir()
+	writeFixture(t, dir, "Untitled 1.md", "separate note")
+	writeFixture(t, dir, "Notes/Untitled.md", "existing note")
+	vault := openFixture(t, dir)
+	if _, err := vault.CreateDocument("Notes/Untitled.md", "replacement"); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("creating an existing note returned %v", err)
+	}
+	const newText = "# 新笔记\r\n"
+	if _, err := vault.CreateDocument("Notes/Untitled 1.md", newText); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		"Untitled 1.md":       "separate note",
+		"Notes/Untitled.md":   "existing note",
+		"Notes/Untitled 1.md": newText,
+	} {
+		contents, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(name)))
+		if err != nil || string(contents) != want {
+			t.Fatalf("note %q = %q, %v; want %q", name, contents, err, want)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "Notes"))
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("note directory contains unexpected entries: %v, %v", entries, err)
+	}
+}
+
 func TestCreateAndDuplicatePreserveExistingNotes(t *testing.T) {
 	dir := t.TempDir()
 	vault := openFixture(t, dir)

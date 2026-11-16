@@ -78,6 +78,29 @@ func (app *workspaceWindow) vaultSiblingOrderMenu(m *mygoui.Menu, relative strin
 	}).Disabled(app.vault == nil || index == -1 || len(siblings) < 2)
 }
 
+func (app *workspaceWindow) reorderVaultDrop(source, target string, after bool) {
+	folder := path.Dir(source)
+	if app.vault == nil || app.fileSearch != "" || app.graph.tag != "" || source == target || folder != path.Dir(target) {
+		return
+	}
+	order := app.preferences.VaultFileOrders[app.root]
+	siblings := order.arrange(folder, app.vaultDefaultSiblings(folder))
+	from := slices.IndexFunc(siblings, func(entry workspace.Entry) bool { return entry.Path == source })
+	to := slices.IndexFunc(siblings, func(entry workspace.Entry) bool { return entry.Path == target })
+	if from < 0 || to < 0 {
+		return
+	}
+	if after {
+		to++
+	}
+	if from < to {
+		to-- // Account for removing the source before inserting it.
+	}
+	if from != to {
+		app.reorderVaultSiblings(order, folder, siblings, from, to)
+	}
+}
+
 func (app *workspaceWindow) reorderVaultSiblings(order vaultFileOrder, folder string, siblings []workspace.Entry, from, to int) {
 	names := make([]string, len(siblings))
 	remaining := make(map[string]bool, len(siblings))
@@ -85,7 +108,8 @@ func (app *workspaceWindow) reorderVaultSiblings(order vaultFileOrder, folder st
 		names[i] = entry.Name
 		remaining[entry.Name] = true
 	}
-	names[from], names[to] = names[to], names[from]
+	moved := names[from]
+	names = slices.Insert(slices.Delete(names, from, from+1), to, moved)
 	// Keep previously ranked names hidden by the current file type filter.
 	var ranks []string
 	for _, name := range order.Folders[folder] {

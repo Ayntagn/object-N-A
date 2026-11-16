@@ -86,7 +86,20 @@ func (app *workspaceWindow) source(c *mygoui.Context) {
 		if !app.focusMode {
 			app.formatToolbar(c)
 		}
-		app.drawSourceEditor(c, app.workspaceTab, "Source editor")
+		mygoui.Column(c.Key("source content")).Grow(1).MinHeight(0).MinWidth(0).Children(func() {
+			startPage := app.showsStartPage()
+			editor := mygoui.Column(c.Key("editable source")).Grow(1).MinHeight(0).MinWidth(0)
+			if startPage && !c.Preferences().HighContrast {
+				// EV-UI-315: the focused empty editor remains visible below the picker.
+				editor.Opacity(.12)
+			}
+			editor.Children(func() { app.drawSourceEditor(c, app.workspaceTab, "Source editor") })
+			if startPage {
+				width, _ := app.paneToolWidths(c)
+				mygoui.Column(c.Key("start writing overlay")).Absolute().Left(0).Top(0).Right(0).Bottom(0).
+					PassThrough().Clip().Children(func() { app.drawStartWriting(c, width) })
+			}
+		})
 	})
 }
 
@@ -168,6 +181,10 @@ func (app *workspaceWindow) registerEditorShortcuts(c *mygoui.Context) {
 }
 
 func (app *workspaceWindow) sourceInput(event mygoui.InputEvent) bool {
+	if event.Kind == mygoui.InputText && event.Text != "" && !app.multiFile.active &&
+		app.document.Path == "" && app.sourceEditing() && app.showsStartPage() {
+		app.startTitleFromSource = true
+	}
 	if app.snippets.open && event.Kind == mygoui.InputKeyDown && event.Key == mygoui.KeyEscape && event.Mods == 0 {
 		app.snippets.open = false
 		return true
@@ -186,7 +203,7 @@ func (app *workspaceWindow) sourceInput(event mygoui.InputEvent) bool {
 		app.toggleLineNumbers()
 		return true
 	}
-	if app.applySourceMarkdownShortcut(event) {
+	if app.applySourceMarkdownShortcut(event) || app.completeSourceCodeFence(event) {
 		return true
 	}
 	return app.formattingInput(event) || app.autoIndentSourceParagraph(event)

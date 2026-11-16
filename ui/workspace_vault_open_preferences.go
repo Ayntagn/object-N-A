@@ -80,11 +80,19 @@ func (app *workspaceWindow) vaultOpenSegments(c *mygoui.Context, label string, s
 
 // Sidebar file clicks and drawing links share the ordinary document policy.
 func (app *workspaceWindow) openVaultFileByPreference(relative string, mods mygoui.Modifiers, fromDrawing bool) {
+	app.openVaultFileFollowing(relative, mods, fromDrawing, nil)
+}
+
+func (app *workspaceWindow) openVaultFileFollowing(relative string, mods mygoui.Modifiers, fromDrawing bool, opened func(*workspaceWindow)) {
 	if app.modalOpen || app.vault == nil {
 		return
 	}
+	var finish func()
+	if opened != nil {
+		finish = func() { opened(app) }
+	}
 	if app.multiFile.active {
-		app.openVaultRow(relative, true)
+		app.openVaultRowFollowing(relative, true, finish)
 		return
 	}
 	drawing := isDrawingPath(relative)
@@ -92,13 +100,15 @@ func (app *workspaceWindow) openVaultFileByPreference(relative string, mods mygo
 	separate := app.preferences.SidebarClickNewWindow || mods&mygoui.Cmd != 0 ||
 		(app.preferences.DrawingsOpenSeparately && (drawing || fromDrawing))
 	if editable && separate {
-		app.openVaultDocumentWindow(relative, drawing)
+		if target := app.openVaultDocumentWindow(relative, drawing); target != nil && opened != nil {
+			opened(target)
+		}
 		return
 	}
-	app.openVaultRow(relative, false)
+	app.openVaultRowFollowing(relative, false, finish)
 }
 
-func (app *workspaceWindow) openVaultDocumentWindow(relative string, drawing bool) {
+func (app *workspaceWindow) openVaultDocumentWindow(relative string, drawing bool) *workspaceWindow {
 	absolute := filepath.Join(app.root, filepath.FromSlash(relative))
 	for _, window := range app.documentWindows() {
 		if window.win != nil && window.win.IsDestroyed() {
@@ -117,11 +127,11 @@ func (app *workspaceWindow) openVaultDocumentWindow(relative string, drawing boo
 			if window.win != nil {
 				window.win.Focus()
 			}
-			return
+			return window
 		}
 	}
 	if app.application == nil || app.win == nil {
-		return
+		return nil
 	}
 
 	tab := app.blankTab()
@@ -130,14 +140,14 @@ func (app *workspaceWindow) openVaultDocumentWindow(relative string, drawing boo
 		draw, err := loadWorkspaceDrawing(app.vault, relative)
 		if err != nil {
 			app.problem = fmt.Sprintf("Could not open %q. %v", relative, err)
-			return
+			return nil
 		}
 		app.setTabDrawing(tab, draw)
 	} else {
 		doc, err := app.vault.ReadTextDocument(relative)
 		if err != nil {
 			app.problem = fmt.Sprintf("Could not open %q. %v", relative, err)
-			return
+			return nil
 		}
 		app.setTabDocument(tab, doc)
 		if workspace.IsSourceTextPath(relative) {
@@ -148,4 +158,5 @@ func (app *workspaceWindow) openVaultDocumentWindow(relative string, drawing boo
 	next.win.Show()
 	app.application.activate(next)
 	next.persistSession()
+	return next
 }

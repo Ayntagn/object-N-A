@@ -31,11 +31,7 @@ func loadPreviewSnippets(text string, dark bool) *previewSnippetLibrary {
 	if file, err := snippetFile(false); err == nil {
 		library.items, _ = snippets.Load(file)
 	}
-	codeTheme := "atom-one-light"
-	if dark {
-		codeTheme = "night-owl"
-	}
-	library.codeTheme = sourceThemeForID(codeTheme).palette
+	library.codeTheme = previewCodeTheme(dark)
 	return library
 }
 

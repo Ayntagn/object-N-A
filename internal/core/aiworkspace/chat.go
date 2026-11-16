@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/go-text/typesetting/segmenter"
 )
 
 var (
@@ -26,16 +30,26 @@ type completionRequest struct {
 // Test sends the short connection probe and returns the model identified by
 // the service, if provided.
 func Test(ctx context.Context, config Config) (string, error) {
-	// EV-UI-230. The connection test sends one short, non-streaming turn.
-	response, err := postCompletion(ctx, config, completionRequest{
-		Model: strings.TrimSpace(config.Model), Messages: []Message{{Role: "user", Content: "Hi"}}, MaxTokens: 5,
+	connection, err := normalize(config)
+	if err != nil {
+		return "", err
+	}
+	// EV-UI-230 and EV-UI-288. Claude's short probe also has a system prompt.
+	messages := []Message{{Role: "user", Content: "Hi"}}
+	if connection.isAnthropic() {
+		messages = append([]Message{{Role: "system", Content: "Respond with just 'ok'."}}, messages...)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	response, err := connection.postCompletion(ctx, completionRequest{
+		Model: connection.config.Model, Messages: messages, MaxTokens: 5,
 	})
 	if err != nil {
 		return "", connectionTestError(err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return "", &StatusError{StatusCode: response.StatusCode}
+		return "", connectionTestError(&StatusError{StatusCode: response.StatusCode})
 	}
 	data, err := readResponse(ctx, response.Body)
 	if err != nil {
@@ -65,55 +79,83 @@ func connectionTestError(err error) error {
 		case http.StatusTooManyRequests:
 			return errors.New("Rate limited - try again later")
 		}
+		if result.StatusCode >= 500 && result.StatusCode <= 599 {
+			return fmt.Errorf("Server error (%d)", result.StatusCode)
+		}
+		return fmt.Errorf("HTTP %d", result.StatusCode)
 	}
 	return err
 }
 
-// Chat sends the conversation and returns the reply. If onDelta is supplied,
-// Chat requests streaming and calls it synchronously in receive order on the
-// caller's goroutine. An interrupted stream returns the text received so far
-// along with an error. Cancel the context to stop a pending request.
-func Chat(ctx context.Context, config Config, messages []Message, onDelta func(string)) (string, error) {
-	// EV-UI-231. Workspace chat sends its supplied turns unchanged and omits
-	// the connection probe's token limit.
-	response, err := postCompletion(ctx, config, completionRequest{
-		Model: strings.TrimSpace(config.Model), Messages: messages, Stream: onDelta != nil,
+// ChatReply contains the text and, for a completed SSE stream, its metrics.
+type ChatReply struct {
+	Text    string
+	Metrics ReplyMetrics
+}
+
+// Chat sends the conversation. If onDelta is supplied, Chat requests streaming
+// and calls it synchronously in receive order on the caller's goroutine. An
+// interrupted stream returns the text received so far along with an error.
+func Chat(ctx context.Context, config Config, messages []Message, onDelta func(string, StreamProgress)) (ChatReply, error) {
+	if strings.TrimSpace(config.Model) == "" {
+		return ChatReply{}, errMissingModel
+	}
+	connection, err := normalize(config)
+	if err != nil {
+		return ChatReply{}, err
+	}
+	startedAt := time.Now()
+	response, err := connection.postCompletion(ctx, completionRequest{
+		Model: connection.config.Model, Messages: messages, Stream: onDelta != nil,
 	})
 	if err != nil {
-		return "", err
+		return ChatReply{}, err
 	}
 	defer response.Body.Close()
 
 	mediaType, _, _ := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if mediaType == "text/event-stream" {
-		return readChatStream(ctx, response.Body, onDelta)
+		if connection.isAnthropic() {
+			return readAnthropicChatStream(ctx, response.Body, startedAt, onDelta)
+		}
+		return readChatStream(ctx, response.Body, startedAt, onDelta)
 	}
 	data, err := readResponse(ctx, response.Body)
 	if err != nil {
-		return "", err
+		return ChatReply{}, err
 	}
-	choice, err := decodeChoice(data)
+	var text string
+	if connection.isAnthropic() {
+		text, err = decodeAnthropicReply(data)
+	} else {
+		var choice completionChoice
+		choice, err = decodeChoice(data)
+		text = choice.Message.Content
+	}
 	if err != nil {
-		return "", err
+		return ChatReply{}, err
 	}
-	text := choice.Message.Content
 	if text == "" {
-		return "", errEmptyReply
+		return ChatReply{}, errEmptyReply
 	}
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return ChatReply{}, err
 	}
 	if onDelta != nil {
-		onDelta(text)
+		onDelta(text, StreamProgress{})
 	}
-	return text, ctx.Err()
+	return ChatReply{Text: text}, ctx.Err()
 }
 
-func postCompletion(ctx context.Context, config Config, request completionRequest) (*http.Response, error) {
-	if request.Model == "" {
-		return nil, errMissingModel
+func (c serviceConnection) completionJSON(request completionRequest) ([]byte, error) {
+	if c.isAnthropic() {
+		return encodeAnthropicCompletion(request)
 	}
-	payload, err := json.Marshal(request)
+	return json.Marshal(request)
+}
+
+func (c serviceConnection) postCompletion(ctx context.Context, request completionRequest) (*http.Response, error) {
+	payload, err := c.completionJSON(request)
 	if err != nil {
 		return nil, errInvalidResponse
 	}
@@ -121,7 +163,7 @@ func postCompletion(ctx context.Context, config Config, request completionReques
 	if request.Stream {
 		accept = "text/event-stream, application/json"
 	}
-	return openResponse(ctx, config, http.MethodPost, "chat/completions", accept, payload)
+	return c.openResponse(ctx, http.MethodPost, c.completionRoute(), accept, payload)
 }
 
 type completionChoice struct {
@@ -147,15 +189,18 @@ func decodeChoice(data []byte) (completionChoice, error) {
 	return completionChoice{}, nil
 }
 
-func readChatStream(ctx context.Context, source io.Reader, onDelta func(string)) (string, error) {
+func readChatStream(ctx context.Context, source io.Reader, startedAt time.Time, onDelta func(string, StreamProgress)) (ChatReply, error) {
 	var text strings.Builder
-	finished := false
+	var segments segmenter.Segmenter
+	var endedAt time.Time
+	progress := StreamProgress{startedAt: startedAt}
 	err := readEvents(ctx, source, func(data string) (bool, error) {
+		receivedAt := time.Now()
 		switch strings.TrimSpace(data) {
 		case "":
 			return false, nil
 		case "[DONE]":
-			finished = true
+			endedAt = receivedAt
 			return true, nil
 		}
 		choice, err := decodeChoice([]byte(data))
@@ -164,21 +209,27 @@ func readChatStream(ctx context.Context, source io.Reader, onDelta func(string))
 		}
 		if chunk := choice.Delta.Content; chunk != "" {
 			text.WriteString(chunk)
+			progress.observeText(&segments, chunk, receivedAt)
 			if onDelta != nil {
-				onDelta(chunk)
+				onDelta(chunk, progress)
 			}
 		}
-		finished = choice.FinishReason != ""
-		return finished, nil
+		if choice.FinishReason != "" {
+			endedAt = receivedAt
+			return true, nil
+		}
+		return false, nil
 	})
+	reply := ChatReply{Text: text.String()}
 	if err != nil {
-		return text.String(), err
+		return reply, err
 	}
-	if !finished {
-		return text.String(), errIncompleteResponse
+	if endedAt.IsZero() {
+		return reply, errIncompleteResponse
 	}
 	if text.Len() == 0 {
-		return "", errEmptyReply
+		return reply, errEmptyReply
 	}
-	return text.String(), nil
+	reply.Metrics = progress.MetricsAt(endedAt)
+	return reply, nil
 }

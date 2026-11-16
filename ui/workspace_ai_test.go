@@ -197,7 +197,7 @@ func TestAIContextReaderCopiesWholeSnapshot(t *testing.T) {
 	var notes string
 	closed := false
 	tester := mygoui.NewTester(func(c *mygoui.Context) {
-		drawAIContextReader(c, true, snapshot, 22, &notes, func() { closed = true }, nil)
+		drawAIContextReader(c, true, snapshot, 22, "", &notes, func() { closed = true }, nil)
 	}, aiContextWidth, aiContextHeight)
 	if body, ok := tester.AccessByRole(mygoui.RoleTextField, "Attached context"); !ok ||
 		body.Bounds.W != 404 || body.Bounds.H != 249 || !body.ReadOnly {
@@ -222,7 +222,7 @@ func TestAIContextReaderCopiesWholeSnapshot(t *testing.T) {
 	}
 
 	tester = mygoui.NewTester(func(c *mygoui.Context) {
-		drawAIContextReader(c, true, "", 0, &notes, nil, nil)
+		drawAIContextReader(c, true, "", 0, "", &notes, nil, nil)
 	}, aiContextWidth, aiContextHeight)
 	if tester.HasText("Document") || !tester.HasText("0 chars") {
 		t.Fatal("the standalone Notes reader showed attachment metadata")

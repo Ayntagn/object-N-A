@@ -8,7 +8,6 @@ import (
 
 	"cyberwriter/internal/core/workspace"
 	mygoui "github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown/parser"
 	"github.com/egoist/mygo/ui/richtext"
 	"golang.org/x/image/colornames"
@@ -179,7 +178,7 @@ func mathRegions(doc *parser.Document) []mathRegion {
 			case parser.CodeBlock:
 				language := b.Info()
 				if b.Fenced && !b.Open && (strings.EqualFold(language, latex) ||
-					language != "" && language != "bash" && editor.LanguageNamed(language) != nil) {
+					language != "bash" && ordinaryCodeFenceLanguage(language)) {
 					regions = append(regions, mathRegion{mathLineStart(raw, b.Start), trimMathLineEnd(raw, b.End),
 						strings.TrimSuffix(doc.Lines(i), "\n"), language, true})
 				}

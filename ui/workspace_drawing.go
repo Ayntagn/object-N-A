@@ -104,7 +104,7 @@ func (app *workspaceWindow) openNewDrawing(file workspace.Drawing) {
 		app.refreshVault()
 		return
 	}
-	tab := app.availableTab()
+	tab := app.availableTab(true)
 	app.setTabDrawing(tab, newWorkspaceDrawing(app.vault, file))
 	app.refreshVault()
 	app.activateTab(tab)
@@ -126,7 +126,7 @@ func (app *workspaceWindow) openDrawing(relativePath string, newTab bool) {
 		}
 		tab := app.workspaceTab
 		if newTab {
-			tab = app.availableTab()
+			tab = app.availableTab(true)
 		}
 		app.releaseTabStorage(tab)
 		app.setTabDrawing(tab, draw)

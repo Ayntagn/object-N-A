@@ -14,8 +14,11 @@ import (
 const vaultSearchDebounce = 180 * time.Millisecond
 
 type vaultSidebarSearch struct {
-	cancel  context.CancelFunc
-	results []vaultindex.SidebarSearchHit
+	cancel                 context.CancelFunc
+	results                []vaultindex.SidebarSearchHit
+	related                *vaultRelatedSearch
+	presentedRelated       vaultRelatedPresentation
+	relatedRefreshDeferred bool
 }
 
 func (app *workspaceWindow) vaultSearchField(c *mygoui.Context) {
@@ -48,9 +51,11 @@ func (app *workspaceWindow) vaultSearchField(c *mygoui.Context) {
 				}).Children(func() { chromeIconColor(c, "xmark.circle.fill", 13, theme.TextMuted) })
 		}
 	})
-	if input.Focused() {
+	// EV-UI-327. Blackout keeps the same neutral stroke when search acquires focus.
+	focused := input.Focused()
+	if focused && (!app.blackout || c.Preferences().HighContrast) {
 		field.BorderColor(theme.Accent)
-	} else if field.Hovered() {
+	} else if !focused && field.Hovered() {
 		field.BorderColor(theme.Border.Mix(theme.Text, .25))
 	}
 }
@@ -59,6 +64,7 @@ func (app *workspaceWindow) clearVaultSidebarSearch() {
 	if app.sidebarSearch.cancel != nil {
 		app.sidebarSearch.cancel()
 	}
+	app.sidebarSearch.related.stop()
 	app.sidebarSearch = vaultSidebarSearch{}
 }
 
@@ -72,19 +78,24 @@ func (app *workspaceWindow) leaveVaultFiles() {
 }
 
 func (app *workspaceWindow) vaultSearchChanged() {
-	app.clearVaultSidebarSearch()
+	app.sidebarSearch.relatedRefreshDeferred = false
 	input := app.fileSearch
 	query := vaultindex.TrimSidebarSearchQuery(input)
-	if query == "" {
-		app.publishVaultSearch(nil)
+	if query == "" || app.vault == nil {
+		app.clearVaultSidebarSearch()
+		app.publishVaultSearchGraph()
 		return
 	}
-	if app.vault == nil {
-		return
+	// EV-UI-313: cancel the old task while keeping its published rows.
+	if cancel := app.sidebarSearch.cancel; cancel != nil {
+		cancel()
+		app.sidebarSearch.cancel = nil
 	}
 	// The query captures the published file and label snapshots at input time
 	// and remains visible across later index publications (EV-UI-188/189).
 	vault, entries, index, win := app.vault, app.entries, app.index.data, app.win
+	app.startVaultRelatedSearch(input, query)
+	app.publishVaultSearchGraph()
 	if win == nil {
 		app.publishVaultSearch(index.SearchSidebar(context.Background(), vault, entries, query, ""))
 		return
@@ -117,15 +128,7 @@ func (app *workspaceWindow) vaultSearchChanged() {
 // that have no node to highlight in either Graph canvas.
 func (app *workspaceWindow) publishVaultSearch(results []vaultindex.SidebarSearchHit) {
 	app.sidebarSearch.results, app.sidebarSearch.cancel = results, nil
-	var highlight map[string]bool
-	if len(results) > 0 {
-		highlight = make(map[string]bool, len(results))
-		for _, result := range results {
-			highlight[result.Entry.Path] = true
-		}
-	}
-	app.graph.highlight = highlight
-	app.invalidateGraphWindow()
+	app.publishVaultSearchGraph()
 }
 
 func (app *workspaceWindow) searchVault(c *mygoui.Context, tagged []workspace.Entry) {
@@ -140,18 +143,24 @@ func (app *workspaceWindow) searchVault(c *mygoui.Context, tagged []workspace.En
 			}
 			return
 		}
-		if state.cancel != nil && length != 0 {
+		if state.cancel != nil && length != 0 && len(state.results) == 0 {
 			message := "Filtering by name…"
 			if length >= 2 {
 				message = fmt.Sprintf("Searching %d notes…", app.vaultFileCount)
 			}
 			mygoui.Text(c, message).Padding(6, 12).Role(mygoui.RoleStatus)
-			return
 		}
 		for _, result := range state.results {
 			app.searchResultRow(c, tree, result, colors)
 		}
 		if length >= 3 {
+			presentation := app.presentVaultRelatedSearch()
+			if !presentation.buildHint {
+				if len(presentation.matches) != 0 {
+					app.drawVaultRelatedResults(c, presentation.matches, colors)
+				}
+				return
+			}
 			mygoui.Row(c.Key("concept search")).FillWidth().Padding(6, 12, 0).Gap(6).AlignItems(mygoui.Center).Children(func() {
 				iconInk := app.vaultMarkdownIconInk(c, colors)
 				mygoui.Row(c).Width(12).Shrink(0).Children(func() {

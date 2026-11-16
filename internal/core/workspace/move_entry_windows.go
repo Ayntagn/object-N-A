@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"os"
 	"unsafe"
 
@@ -37,7 +38,11 @@ func renameEntry(fromDir *os.File, from string, toDir *os.File, to string) error
 	if err != nil {
 		return err
 	}
-	info := fileRenameInformation{RootDirectory: windows.Handle(toDir.Fd())}
+	var info fileRenameInformation
+	// A simple name with no RootDirectory renames within the source directory.
+	if fromDir != toDir {
+		info.RootDirectory = windows.Handle(toDir.Fd())
+	}
 	if len(target) > len(info.FileName) {
 		return windows.ERROR_FILENAME_EXCED_RANGE
 	}
@@ -53,4 +58,8 @@ func renameWindowsError(err error) error {
 		return status.Errno()
 	}
 	return err
+}
+
+func unsupportedLifecycleCommit(err error) bool {
+	return errors.Is(err, errors.ErrUnsupported) || errors.Is(err, windows.ERROR_INVALID_FUNCTION)
 }

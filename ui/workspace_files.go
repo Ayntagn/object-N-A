@@ -70,15 +70,20 @@ func (app *workspaceWindow) relativeToVault(absolute string) (string, bool) {
 	return relative, true
 }
 
+const documentPickerTitle = "Open Document"
+
+var documentPickerFilter = mygo.FileFilter{
+	Name:       "Notes, Drawings, PDFs and Images",
+	Extensions: []string{"md", "markdown", "excalidraw", "pdf", "png", "jpg", "jpeg", "gif", "webp"},
+}
+
 func (app *workspaceWindow) filePicker() {
+	open := func(filename string) { app.openPickedDocument(filename, false) }
 	if app.multiFile.active {
-		app.pickDocument("Open Markdown", mygo.FileFilter{Name: "Markdown", Extensions: []string{"md", "markdown"}})
+		app.pickDocument("Open Markdown", mygo.FileFilter{Name: "Markdown", Extensions: []string{"md", "markdown"}}, open)
 		return
 	}
-	app.pickDocument("Open Document", mygo.FileFilter{
-		Name:       "Notes, Drawings, PDFs and Images",
-		Extensions: []string{"md", "markdown", "excalidraw", "pdf", "png", "jpg", "jpeg", "gif", "webp"},
-	})
+	app.pickDocument(documentPickerTitle, documentPickerFilter, open)
 }
 
 func (app *workspaceWindow) drawingPicker() {
@@ -86,10 +91,10 @@ func (app *workspaceWindow) drawingPicker() {
 		app.problem = multiFileMarkdownOnly
 		return
 	}
-	app.pickDocument("Open Drawing", mygo.FileFilter{Name: "Drawings", Extensions: []string{"excalidraw"}})
+	app.pickDocument("Open Drawing", mygo.FileFilter{Name: "Drawings", Extensions: []string{"excalidraw"}}, app.openPickedFile)
 }
 
-func (app *workspaceWindow) pickDocument(title string, filter mygo.FileFilter) {
+func (app *workspaceWindow) pickDocument(title string, filter mygo.FileFilter, open func(string)) {
 	if app.modalOpen {
 		return
 	}
@@ -107,12 +112,16 @@ func (app *workspaceWindow) pickDocument(title string, filter mygo.FileFilter) {
 			if len(files) == 0 {
 				return
 			}
-			app.openPickedFile(files[0])
+			open(files[0])
 		})
 	}()
 }
 
 func (app *workspaceWindow) openPickedFile(absolute string) {
+	app.openPickedDocument(absolute, true)
+}
+
+func (app *workspaceWindow) openPickedDocument(absolute string, replaceInitial bool) {
 	if app.multiFile.active && !workspace.IsMarkdownPath(absolute) {
 		app.problem = multiFileMarkdownOnly
 		return
@@ -126,7 +135,7 @@ func (app *workspaceWindow) openPickedFile(absolute string) {
 		return
 	}
 	if relative, ok := app.relativeToVault(absolute); ok {
-		app.openNote(relative, app.draft != nil || app.drawing != nil)
+		app.openNote(relative, (app.draft != nil || app.drawing != nil) && !(replaceInitial && app.canReplaceInitialTab()))
 		return
 	}
 	for _, tab := range app.tabs {
@@ -148,7 +157,7 @@ func (app *workspaceWindow) openPickedFile(absolute string) {
 			app.problem = fmt.Sprintf("Could not open %q. %v", absolute, err)
 			return
 		}
-		tab := app.availableTab()
+		tab := app.availableTab(replaceInitial)
 		tab.storage, tab.folderRoot = storage, root
 		app.setTabDrawing(tab, draw)
 		app.activateTab(tab)
@@ -160,14 +169,17 @@ func (app *workspaceWindow) openPickedFile(absolute string) {
 		app.problem = fmt.Sprintf("Could not open %q. %v", absolute, err)
 		return
 	}
-	tab := app.availableTab()
+	tab := app.availableTab(replaceInitial)
 	tab.storage, tab.folderRoot = storage, root
 	app.setTabDocument(tab, doc)
 	app.activateTab(tab)
 }
 
-func (app *workspaceWindow) availableTab() *workspaceTab {
+func (app *workspaceWindow) availableTab(replaceInitial bool) *workspaceTab {
 	if app.draft == nil && app.drawing == nil {
+		return app.workspaceTab
+	}
+	if replaceInitial && app.canReplaceInitialTab() {
 		return app.workspaceTab
 	}
 	tab := app.blankTab()
@@ -177,13 +189,13 @@ func (app *workspaceWindow) availableTab() *workspaceTab {
 
 func (app *workspaceWindow) newDocument() {
 	if app.vault != nil && app.preferences.NewInVault {
-		app.createNote(".", "")
+		app.addVaultNote()
 		return
 	}
 	if app.modalOpen {
 		return
 	}
-	tab := app.availableTab()
+	tab := app.availableTab(true)
 	tab.mode = app.preferences.DefaultView
 	app.setTabDocument(tab, workspace.Document{})
 	app.activateTab(tab)
@@ -339,7 +351,7 @@ func (app *workspaceWindow) createNote(folder, content string) {
 }
 
 func (app *workspaceWindow) openCreatedNote(doc workspace.Document) {
-	tab := app.availableTab()
+	tab := app.availableTab(true)
 	tab.mode = app.preferences.DefaultView
 	app.setTabDocument(tab, doc)
 	app.refreshVault()

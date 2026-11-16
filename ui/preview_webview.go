@@ -36,6 +36,7 @@ type previewFrame struct {
 	LineSpacing   float64 `json:"lineSpacing"`
 	ScrollPastEnd bool    `json:"scrollPastEnd"`
 	Anchor        string  `json:"anchor,omitempty"`
+	RevealLine    int     `json:"revealLine,omitempty"`
 }
 
 type workspacePreview struct {
@@ -65,6 +66,7 @@ type workspacePreview struct {
 	apiEnabled       bool
 	apiVersion       uint64
 	apiDocument      uint64
+	codeCopies       previewCodeCopies
 }
 
 func (p *workspacePreview) init(app *workspaceWindow) {
@@ -112,7 +114,8 @@ func (p *workspacePreview) init(app *workspaceWindow) {
 	})
 	page.OnWillNavigate(func(e *mygo.NavigateEvent) {
 		e.PreventDefault()
-		if !e.UserInitiated || p.handleAPINavigation(app, view, e.URL) || p.handleSnippetNavigation(app, view, e.URL) {
+		if !e.UserInitiated || p.handleCodeCopyNavigation(app, view, e.URL) ||
+			p.handleAPINavigation(app, view, e.URL) || p.handleSnippetNavigation(app, view, e.URL) {
 			return
 		}
 		if relative, anchor, currentTab, ok := previewNoteNavigation(e.URL); ok {
@@ -175,12 +178,14 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 			drawSourceFilePreview(c, label, text, badge, zoom)
 			return
 		}
+		style := theme.markdownTheme(zoom, spacing)
+		style.CodeColors = previewCodeTheme(theme.dark())
 		mygoui.Scroll(c).Grow(1).MinHeight(0).FillWidth().Label("Markdown Preview").Padding(24).
 			Background(mygoui.Hex(theme.BackgroundColor)).Children(func() {
-			markdown.View(c, text, &markdown.Options{
+			markdown.View(c, text, withMarkdownCodeBadges(&markdown.Options{
 				Extensions: parser.GFM,
-				Theme:      theme.markdownTheme(zoom, spacing),
-			})
+				Theme:      style,
+			}))
 		})
 		return
 	}
@@ -211,6 +216,7 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 	if switched || p.refreshPending || p.source != text || p.theme != theme.ID || p.customCSS != customCSS ||
 		p.lineSpacing != spacing || p.scrollPastEnd != app.preferences.ScrollPastEnd ||
 		p.numberFigures != app.preferences.NumberFigures || app.previewAnchor != "" ||
+		app.previewRevealLine > 0 ||
 		p.apiEnabled != apiEnabled || (apiEnabled && p.apiVersion != app.textVersion) {
 		var themeFonts string
 		if p.theme != theme.ID || p.refreshPending {
@@ -225,6 +231,7 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 		p.chartFiles = nil
 		var body string
 		title := app.title()
+		copies := previewCodeCopies{revision: p.revision + 1}
 		if kind == documentMarkdown {
 			resources := app.previewOrigin().resources()
 			if resources != nil && app.storage == nil && p.path == workspace.VaultHealthFile && vaultindex.IsGeneratedHealthReport(text) {
@@ -233,6 +240,7 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 			figures := figureRender{numbered: p.numberFigures}
 			markup := previewMarkup{doc: p.parsed, resources: resources, relative: p.path, charts: true,
 				figures: &figures, liveQueries: true, queryIndex: p.queryIndex, liveAPIFences: true,
+				codeTheme: previewCodeTheme(theme.dark()), codeCopies: &copies,
 				snippets: loadPreviewSnippets(text, theme.dark())}
 			if apiEnabled {
 				if p.apiDocument == 0 {
@@ -252,12 +260,14 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 		p.revision++
 		frame := previewFrame{Revision: p.revision, Document: p.document, Title: title, Label: label, HTML: body,
 			Theme: p.theme, ThemeFonts: themeFonts, CustomCSS: customCSS, LineSpacing: spacing,
-			ScrollPastEnd: p.scrollPastEnd, Anchor: app.previewAnchor}
+			ScrollPastEnd: p.scrollPastEnd, Anchor: app.previewAnchor, RevealLine: app.previewRevealLine}
 		if err := previewChanged.EmitPage(p.view.Page(), frame); err != nil {
 			p.refreshPending = true
 			log.Printf("Update Markdown Preview: %v", err)
 		} else {
+			p.codeCopies = copies
 			app.previewAnchor = ""
+			app.previewRevealLine = 0
 			if !p.mermaidRequested && strings.Contains(body, mermaidBlockStart) {
 				p.mermaidRequested = true
 				go loadPreviewAsset(p.view.Page(), "Mermaid", mermaidLoader)
@@ -346,6 +356,7 @@ type previewMarkup struct {
 	standalone         standaloneHTMLMode
 	htmlBlocks         bool
 	codeTheme          *editor.Theme
+	codeCopies         *previewCodeCopies
 	liveQueries        bool
 	queryIndex         *vaultindex.Index
 	wikiFigures        []deferredWikiFigure
@@ -426,7 +437,8 @@ func (m *previewMarkup) blocks(parent int) {
 					continue
 				}
 			}
-			if m.codeTheme != nil && block.Fenced && !block.Open && m.writeHighlightedFence(block.Language(), anchor, source) {
+			if block.Fenced && !block.Open {
+				m.writeFencedCode(block.Language(), anchor, source)
 				continue
 			}
 			fmt.Fprintf(&m.out, "<pre%s><code>%s</code></pre>", anchor, html.EscapeString(source))
@@ -713,13 +725,13 @@ var previewStyles = `
   .query-error { color: #e05252; }
   .page-break { margin: 1.5em 0; border-top: 1px dashed rgba(127,127,127,.4); }
 ` + previewMermaidCSS + previewVegaCSS + previewAPICSS + previewSnippetCSS + sourceFilePreviewCSS + delimitedPreviewCSS + previewScrollCSS +
-	documentPreviewPalettes + documentThemeElements + documentPreviewLayout
+	documentPreviewPalettes + documentThemeElements + documentPreviewLayout + previewCodeCSS
 
 var previewPage = previewHTMLShell("Markdown Preview", "", previewContentPolicy, "", 0, "", "")
 
 // MyGo installs the preload; the document permits the pinned chart scripts.
 func previewScript() string {
-	return `(() => {` + previewMathScript() + previewMermaidJS + previewVegaJS + previewScrollJS + previewAPIScript + previewSnippetScript + `
+	return `(() => {` + previewMathScript() + previewMermaidJS + previewVegaJS + previewScrollJS + previewAPIScript + previewSnippetScript + previewCodeScript + `
   const chartSelector = diagramSelector + "," + vegaSelector;
   const chartKey = node => node.matches(diagramSelector) ? diagramKey(node) : vegaKey(node);
 
@@ -783,6 +795,7 @@ func previewScript() string {
     preview.setAttribute("aria-label", frame.label || "Markdown Preview");
     window.scrollTo(0, scrollY);
     if (frame.anchor) document.getElementById(frame.anchor)?.scrollIntoView();
+    if (frame.revealLine > 0) scrollPreview({line: frame.revealLine});
     revision = frame.revision;
     documentID = frame.document;
   });

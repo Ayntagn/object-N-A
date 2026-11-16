@@ -3,13 +3,87 @@ package wysiwyg
 import (
 	"crypto/rand"
 	"strings"
+	"unicode"
 
+	"github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown/parser"
 	"github.com/egoist/mygo/ui/richtext"
 )
 
 const bashFencePrefix = "bash-fence:"
 const compactFencePrefix = "compact-fence:"
+
+type typedCodeFence struct {
+	start, end               int
+	opener, closer, language string
+}
+
+// A single language label can round-trip through the ordinary code card
+// even when MyGo has no source-editor grammar for it.
+func ordinaryCodeFenceLanguage(language string) bool {
+	switch strings.ToLower(language) {
+	case "", "latex", "mermaid", "vega", "vega-lite", "query", "api", "api-result":
+		return false
+	}
+	if editor.LanguageNamed(language) != nil {
+		return true
+	}
+	return strings.IndexFunc(language, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune("_+.#-", r)
+	}) < 0
+}
+
+func (s *Session) typedCodeFence() (typedCodeFence, bool) {
+	if s.Document == nil || !s.Current(s.draft) {
+		return typedCodeFence{}, false
+	}
+	anchor, caret := s.Document.Selection()
+	text := s.Document.Text()
+	start, end := text.ParagraphRange(caret)
+	style := text.ParagraphStyleAt(start)
+	if anchor != caret || caret != end || end-start <= 3 || style.CodeBlock || style.Quote ||
+		style.List != richtext.NoList || style.Heading != 0 || style.Indent != 0 {
+		return typedCodeFence{}, false
+	}
+	if text.Slice(start, start+3).String() != "```" {
+		return typedCodeFence{}, false
+	}
+	opener := text.Slice(start, end).String()
+	info := strings.TrimLeft(opener, "`")
+	width := len(opener) - len(info)
+	language := strings.TrimSpace(info)
+	if strings.ContainsRune(info, '`') || !ordinaryCodeFenceLanguage(language) {
+		return typedCodeFence{}, false
+	}
+	return typedCodeFence{start, end, opener, opener[:width], language}, true
+}
+
+func (s *Session) CanCompleteTypedCodeFence() bool {
+	_, ok := s.typedCodeFence()
+	return ok
+}
+
+// CompleteTypedCodeFence turns a named opener into the same editable block
+// used to load existing fenced code, without losing its language on Enter.
+func (s *Session) CompleteTypedCodeFence() (*Formula, bool) {
+	fence, ok := s.typedCodeFence()
+	if !ok {
+		return nil, false
+	}
+	if fence.language == "bash" {
+		// Bash fences in templates already use an ordinary code paragraph.
+		s.Document.Edit(func(edit *richtext.Edit) {
+			edit.ReplaceString(fence.start, fence.end, "", richtext.Attributes{})
+			edit.FormatParagraphs(fence.start, fence.start, func(p *richtext.ParagraphStyle) {
+				*p = richtext.ParagraphStyle{CodeBlock: true, ID: bashFencePrefix + rand.Text()}
+			})
+			edit.Select(fence.start, fence.start)
+		})
+		return nil, true
+	}
+	formula := newFormula("", "", fence.language, fence.opener+"\n\n"+fence.closer, true)
+	return formula, s.insertStandaloneAt(formula.object, mathCaretID, false, fence.start, fence.end)
+}
 
 // tagCodeFences gives the paragraphs in a fence one identity so adjacent
 // fences retain their boundaries. IDs also carry Bash and empty fence styles.

@@ -42,7 +42,7 @@ func TestAIContextFollowsActiveDocument(t *testing.T) {
 			t.Errorf("document B exposed document A's %q control", label)
 		}
 	}
-	messages := app.ai.chatMessages(app.activeAIContext(), app.aiChatContextHint("preview B"), "current question")
+	messages := app.chatMessages(app.activeAIContext(), app.aiChatContextHint("preview B"), "current question")
 	if len(messages) != 6 || messages[1].Content != "preview A" || messages[3].Content != "previous reply" {
 		t.Fatalf("document B did not preserve the window conversation: %+v", messages)
 	}

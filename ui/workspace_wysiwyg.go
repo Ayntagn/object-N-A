@@ -326,6 +326,9 @@ func (w *workspaceWYSIWYG) visualSurface(c *mygoui.Context, app *workspaceWindow
 		w.queryLayout = !w.queryLayout
 	}
 	w.drawInlineFormulas(c, app, edit, renderer, font, viewport, padding, text, boxes, anchor, caret)
+	if w.editable(app) && !w.blockMenu.open && w.session.CanCompleteTypedCodeFence() {
+		edit.OnShortcut(0, mygoui.KeyEnter, func() { w.completeVisualCodeFence(app) })
+	}
 	if w.editable(app) && !w.blockMenu.open && w.session.CanCalloutEnter() {
 		edit.OnShortcut(0, mygoui.KeyEnter, func() {
 			if w.session.CalloutEnter() {
@@ -351,6 +354,21 @@ func (w *workspaceWYSIWYG) visualSurface(c *mygoui.Context, app *workspaceWindow
 	if !w.drawBlockMenu(c, app, edit, padding, viewport, text, anchor, caret, boxes, theme, font) {
 		w.drawBlockGutter(c, app, padding, viewport, text, boxes, pointer, over)
 	}
+}
+
+func (w *workspaceWYSIWYG) completeVisualCodeFence(app *workspaceWindow) {
+	if !w.editable(app) {
+		return
+	}
+	formula, ok := w.session.CompleteTypedCodeFence()
+	if !ok {
+		return
+	}
+	if formula != nil {
+		w.math.focusBlock = formula.ID
+		w.math.newFence, w.math.newFenceVersion = formula, w.session.Document.Version()
+	}
+	w.sync(app)
 }
 
 func (w *workspaceWYSIWYG) readOnly(c *mygoui.Context, app *workspaceWindow, padding float32) {

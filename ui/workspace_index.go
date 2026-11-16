@@ -25,6 +25,7 @@ type workspaceIndex struct {
 func (app *workspaceWindow) requestIndex() {
 	app.index.generation++
 	app.buildIndex()
+	app.syncAIVaultContext()
 }
 
 func (app *workspaceWindow) buildIndex() {

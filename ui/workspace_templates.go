@@ -101,7 +101,7 @@ func (app *workspaceWindow) openTemplateDirectory() {
 // EV-UI-116: File starts a new document in the current tab group. The
 // command palette and GLOW instead insert into the active document.
 func (app *workspaceWindow) newFromTemplate(markdown string) {
-	tab := app.availableTab()
+	tab := app.availableTab(true)
 	tab.mode = app.preferences.DefaultView
 	app.setTabDocument(tab, workspace.Document{})
 	tab.templateTitle = templates.Heading(markdown)

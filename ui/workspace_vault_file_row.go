@@ -78,6 +78,7 @@ func (app *workspaceWindow) fileRow(c *mygoui.Context, tree mygoui.TreeParts, en
 			m.Separator()
 			app.vaultSiblingOrderMenu(m, entry.Path)
 		})
+	app.vaultTreeDragRow(c, row, mygoui.Element{}, entry.Path, inset)
 	if selected {
 		opacity := float32(.22)
 		switch app.appAppearance() {

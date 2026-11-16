@@ -1,4 +1,4 @@
-// spec: AI Workspace compatible test and chat, EV-UI-230 / EV-UI-231.
+// spec: AI Workspace test, chat and SSE measurements, EV-UI-230 / EV-UI-231 / EV-UI-242 / EV-UI-257.
 package aiworkspace
 
 import (
@@ -16,6 +16,7 @@ import (
 )
 
 func TestChatDeliversIncrementalSSEAndJSON(t *testing.T) {
+	const first = "Cafe\u0301👩🏽‍💻"
 	deltaDelivered := make(chan struct{})
 	history := []Message{
 		{Role: "system", Content: "fixture instructions"},
@@ -47,20 +48,22 @@ func TestChatDeliversIncrementalSSEAndJSON(t *testing.T) {
 		} else if len(fields) != 3 || !slices.Equal(prompt.Messages, history) {
 			t.Error("chat did not send the expected conversation without extra fields")
 		}
-		if !prompt.Stream {
+		if !prompt.Stream || r.URL.Query().Get("reply") == "json" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"本地回复完成"}}]}`)
+			_, _ = io.WriteString(w, `{"choices":[{"index":0,"message":{"role":"assistant","content":"本地回复完成"}}],"usage":{"completion_tokens":128}}`)
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-		_, _ = io.WriteString(w, ": keepalive\n\ndata: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"本地\"}}]}\n\n")
+		_, _ = io.WriteString(w, ": keepalive\n\ndata: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\""+first+"\"}}]}\n\n")
 		w.(http.Flusher).Flush()
 		select {
 		case <-deltaDelivered:
 		case <-r.Context().Done():
 			return
 		}
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"回复完成\"}}]}\n\ndata: [DONE]\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"abc\"}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"content\":\"de\"}}]}\n\n"+
+			"data: {\"choices\":[],\"usage\":{\"completion_tokens\":128}}\n\ndata: [DONE]\n\n")
 	}))
 	defer service.Close()
 
@@ -71,17 +74,37 @@ func TestChatDeliversIncrementalSSEAndJSON(t *testing.T) {
 		t.Fatalf("Test = %q, %v", model, err)
 	}
 	var deltas []string
-	got, err := Chat(ctx, config, history, func(text string) {
+	var lastProgress StreamProgress
+	got, err := Chat(ctx, config, history, func(text string, progress StreamProgress) {
 		deltas = append(deltas, text)
+		lastProgress = progress
 		if len(deltas) == 1 {
 			close(deltaDelivered)
 		}
 	})
-	if err != nil || got != "本地回复完成" || !slices.Equal(deltas, []string{"本地", "回复完成"}) {
-		t.Errorf("streamed chat = %q, deltas %v, error %v", got, deltas, err)
+	if err != nil || got.Text != first+"abcde" || !slices.Equal(deltas, []string{first, "abc", "de"}) {
+		t.Fatalf("streamed chat = %q, deltas %v, error %v", got.Text, deltas, err)
 	}
-	if got, err := Chat(ctx, config, history, nil); err != nil || got != "本地回复完成" {
-		t.Errorf("JSON chat = %q, error %v", got, err)
+	// Each of the three text deltas contributes one estimated token. Counting
+	// Unicode scalars or measuring the joined reply would give a different rate.
+	measured := lastProgress.MetricsAt(lastProgress.startedAt.Add(1500 * time.Millisecond))
+	if measured.TokensPerSecond != 2 || measured.TimeToFirstToken <= 0 ||
+		got.Metrics.TimeToFirstToken != measured.TimeToFirstToken || got.Metrics.TokensPerSecond <= 0 {
+		t.Errorf("streamed chat measurements = %+v, final = %+v", measured, got.Metrics)
+	}
+	if got, err := Chat(ctx, config, history, nil); err != nil || got.Text != "本地回复完成" || got.Metrics != (ReplyMetrics{}) {
+		t.Errorf("JSON chat = %+v, error %v", got, err)
+	}
+	config.BaseURL += "?reply=json"
+	var jsonDelta string
+	got, err = Chat(ctx, config, history, func(text string, progress StreamProgress) {
+		jsonDelta += text
+		if progress != (StreamProgress{}) {
+			t.Errorf("JSON fallback reported stream progress: %+v", progress)
+		}
+	})
+	if err != nil || got.Text != "本地回复完成" || jsonDelta != got.Text || got.Metrics != (ReplyMetrics{}) {
+		t.Errorf("JSON fallback = %+v, delta %q, error %v", got, jsonDelta, err)
 	}
 }
 
@@ -94,14 +117,14 @@ func TestConnectionProbeFeedback(t *testing.T) {
 	}{
 		{name: "empty success", status: 200},
 		{name: "success without model", status: 200, body: `{"choices":[]}`},
-		{name: "created", status: 201, want: "AI service returned HTTP 201"},
-		{name: "no content", status: 204, want: "AI service returned HTTP 204"},
+		{name: "created", status: 201, want: "HTTP 201"},
+		{name: "no content", status: 204, want: "HTTP 204"},
 		{name: "unauthorized", status: 401, want: "Authentication failed - check API key"},
 		{name: "forbidden", status: 403, want: "Access denied - check API key permissions"},
 		{name: "missing endpoint", status: 404, want: "Endpoint not found - check base URL and model name"},
 		{name: "invalid request", status: 422, want: "Invalid request - model may not exist"},
 		{name: "rate limited", status: 429, want: "Rate limited - try again later"},
-		{name: "other error", status: 500, body: "private reply", want: "AI service returned HTTP 500"},
+		{name: "server error", status: 500, body: "private reply", want: "Server error (500)"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			service := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -165,8 +188,13 @@ func TestChatCancellationAndStatusDoNotDiscloseCredentials(t *testing.T) {
 	config := Config{BaseURL: service.URL + "/stream?probe=private-query", Model: "fixture", APIKey: syntheticKey}
 	chatCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	text, err := Chat(chatCtx, config, history, func(string) { cancel() })
-	if !errors.Is(err, context.Canceled) || text != "partial" {
-		t.Errorf("canceled completion = %q, %v", text, err)
+	var stopped ReplyMetrics
+	reply, err := Chat(chatCtx, config, history, func(_ string, progress StreamProgress) {
+		stopped = progress.MetricsAt(progress.startedAt.Add(time.Second))
+		cancel()
+	})
+	if !errors.Is(err, context.Canceled) || reply.Text != "partial" || reply.Metrics != (ReplyMetrics{}) ||
+		stopped.TokensPerSecond != 1 || stopped.TimeToFirstToken <= 0 {
+		t.Errorf("canceled completion = %+v, %v, stopping snapshot = %+v", reply, err, stopped)
 	}
 }

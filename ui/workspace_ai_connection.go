@@ -2,8 +2,8 @@ package ui
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
+	"fmt"
 
 	"cyberwriter/internal/core/aiworkspace"
 	"github.com/egoist/mygo"
@@ -38,6 +38,7 @@ func (saved workspaceAISavedConnection) config() (aiworkspace.Config, error) {
 }
 
 func (app *workspaceWindow) prepareAIConnectionSettings() {
+	app.scanAILocalServices()
 	if app.aiSettingsPrepared {
 		return
 	}
@@ -47,6 +48,7 @@ func (app *workspaceWindow) prepareAIConnectionSettings() {
 		cfg.BaseURL = defaultAIBaseURL
 	}
 	app.aiConnectionForm.Draft = cfg
+	app.aiConnectionForm.ProfileID = app.preferences.AIActiveProfile
 	if err != nil {
 		app.aiConnectionForm.Status = err.Error()
 		app.aiConnectionForm.StatusError = true
@@ -54,13 +56,80 @@ func (app *workspaceWindow) prepareAIConnectionSettings() {
 }
 
 func (app *workspaceWindow) closeAIConnectionSettings() {
+	if request := app.aiServiceRequest; request != nil {
+		request.cancel()
+	}
+	app.aiServiceRequest, app.aiServiceResults = nil, nil
+	app.cancelAIConnectionRequests()
+	app.aiSettingsPrepared = false
+	app.aiConnectionForm = workspaceAIConnectionForm{}
+}
+
+func (app *workspaceWindow) cancelAIConnectionRequests() {
 	for _, request := range []*aiSettingsRequest{app.aiModelRequest, app.aiTestRequest} {
 		if request != nil {
 			request.cancel()
 		}
 	}
 	app.aiModelRequest, app.aiTestRequest = nil, nil
-	app.aiSettingsPrepared = false
+}
+
+// EV-UI-280. Opening the AI page checks the local providers, and Rescan
+// repeats the check with the same request lifetime as the Settings window.
+func (app *workspaceWindow) scanAILocalServices() {
+	if app.aiServiceRequest != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	request := &aiSettingsRequest{cancel: cancel}
+	app.aiServiceRequest, app.aiServiceResults = request, nil
+	go func() {
+		defer cancel()
+		aiworkspace.ScanLocalServices(ctx, func(result aiworkspace.LocalServiceResult) {
+			mygo.RunOnMain(func() {
+				if app.aiServiceRequest == request {
+					app.aiServiceResults = append(app.aiServiceResults, result)
+					app.invalidateAISettings()
+				}
+			})
+		})
+		mygo.RunOnMain(func() {
+			if app.aiServiceRequest != request {
+				return
+			}
+			app.aiServiceRequest = nil
+			app.invalidateAISettings()
+		})
+	}()
+}
+
+func (app *workspaceWindow) useAILocalService(result aiworkspace.LocalServiceResult) {
+	if !result.Online {
+		return
+	}
+	config := aiworkspace.Config{BaseURL: result.Service.BaseURL}
+	if len(result.Models) > 0 {
+		config.Model = result.Models[0]
+	}
+	pending := *app.preferences
+	pending.migrateAIProfiles()
+	pending.AIConnection = workspaceAISavedConnection{BaseURL: config.BaseURL, Model: config.Model}
+	pending.AIActiveProfile = ""
+	if app.commitAIConnectionSettings(pending) {
+		app.cancelAIConnectionRequests()
+		app.aiConnectionForm = workspaceAIConnectionForm{Draft: config}
+	}
+}
+
+// EV-UI-284. Choosing a cloud provider opens a new connection draft.
+func (app *workspaceWindow) useAICloudService(baseURL, displayName string) {
+	app.newAIConnection()
+	app.aiConnectionForm.Draft.BaseURL = baseURL
+	app.aiConnectionForm.Status = fmt.Sprintf(app.tr("Add your %s API key and model below, then Save.", "在下方填写 %s 的 API 密钥和模型，然后保存。"), displayName)
+}
+
+func (app *workspaceWindow) newAIConnection() {
+	app.cancelAIConnectionRequests()
 	app.aiConnectionForm = workspaceAIConnectionForm{}
 }
 
@@ -76,7 +145,8 @@ func (app *workspaceWindow) refreshAIModels() {
 	form.Refreshing = true
 	go func() {
 		defer cancel()
-		models, err := aiworkspace.Models(ctx, draft)
+		// EV-UI-288. Refresh changes the model choices independently from the Test result.
+		models, _ := aiworkspace.Models(ctx, draft)
 		mygo.RunOnMain(func() {
 			if app.aiModelRequest != request {
 				return
@@ -85,11 +155,6 @@ func (app *workspaceWindow) refreshAIModels() {
 			form.Refreshing = false
 			if form.Draft.BaseURL == draft.BaseURL && form.Draft.APIKey == draft.APIKey {
 				form.Models = models
-				if err != nil {
-					form.Status, form.StatusError = err.Error(), true
-				} else {
-					form.Status, form.StatusError = "", false
-				}
 			}
 			app.invalidateAISettings()
 		})
@@ -106,7 +171,6 @@ func (app *workspaceWindow) testAIConnection() {
 	request := &aiSettingsRequest{cancel: cancel}
 	app.aiTestRequest = request
 	form.Testing = true
-	form.Status, form.StatusError = "", false
 	go func() {
 		defer cancel()
 		model, err := aiworkspace.Test(ctx, draft)
@@ -128,43 +192,6 @@ func (app *workspaceWindow) testAIConnection() {
 			app.invalidateAISettings()
 		})
 	}()
-}
-
-func (app *workspaceWindow) saveAIConnection() {
-	form := &app.aiConnectionForm
-	cfg, err := aiworkspace.Normalize(form.Draft)
-	if err != nil {
-		form.Status, form.StatusError = err.Error(), true
-		return
-	}
-	saved := workspaceAISavedConnection{BaseURL: cfg.BaseURL, Model: cfg.Model}
-	if cfg.APIKey != "" {
-		saved.Credential = rand.Text()
-		if err := aiCredentials.Set(saved.Credential, []byte(cfg.APIKey)); err != nil {
-			form.Status, form.StatusError = "Could not save the API key in the system credential store.", true
-			return
-		}
-	}
-	old := app.preferences.AIConnection
-	pending := *app.preferences
-	pending.AIConnection = saved
-	if err := pending.write(); err != nil {
-		if saved.Credential != "" {
-			_ = aiCredentials.Delete(saved.Credential)
-		}
-		form.Status, form.StatusError = "Could not save the AI connection.", true
-		return
-	}
-	app.preferences.AIConnection = saved
-	if old.Credential != "" {
-		_ = aiCredentials.Delete(old.Credential)
-	}
-	form.Draft, form.Status, form.StatusError = cfg, "Settings saved", false
-	if app.application != nil {
-		for _, window := range app.application.windows {
-			window.win.Invalidate()
-		}
-	}
 }
 
 func (app *workspaceWindow) invalidateAISettings() {

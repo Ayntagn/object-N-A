@@ -35,6 +35,7 @@ func (app *workspaceWindow) generalSettings(c *mygoui.Context) {
 			app.settingsSection(c, tr("Startup", "启动"), "power", func() {
 				app.settingsCard(c).Padding(8, 16).Children(func() {
 					app.settingsSwitch(c, tr("Welcome Screen", "欢迎页"), tr("Show on launch", "启动时显示"), "hand.wave", 60, &app.preferences.ShowWelcomeOnLaunch)
+					app.settingsSwitch(c, tr("Launch Animation", "启动动画"), tr("Play on launch", "启动时播放"), "sparkles", 60, &app.preferences.ShowSplashOnLaunch)
 					app.drawAutoSaveStatus(c)
 				})
 			})
@@ -175,7 +176,7 @@ func (app *workspaceWindow) generalVaultSettings(c *mygoui.Context) {
 	app.drawVaultOpenPreferences(c)
 	newDocument := tr("Blank doc; saves into the open vault", "创建空白文档，保存时写入当前资料库")
 	if p.NewInVault {
-		newDocument = tr("Create a note in the open vault", "在当前资料库中创建笔记")
+		newDocument = tr("Created directly in the open vault", "直接在当前资料库中创建")
 	}
 	app.vaultSettingsSegments(c, tr("New Document", "新建文档"), newDocument, "doc.badge.plus", 138, p.NewInVault,
 		[]string{tr("Blank", "空白"), tr("In vault", "资料库内")}, func(value int) {

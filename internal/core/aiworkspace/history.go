@@ -23,12 +23,13 @@ type Conversation struct {
 
 // ConversationTurn contains the visible turn and its eligibility for follow-up requests.
 type ConversationTurn struct {
-	Prompt        string `json:"prompt"`
-	Model         string `json:"model"`
-	Reply         string `json:"reply,omitempty"`
-	Problem       string `json:"problem,omitempty"`
-	PreviewHint   string `json:"previewHint,omitempty"`
-	KeepInHistory bool   `json:"keepInHistory,omitempty"`
+	Prompt        string       `json:"prompt"`
+	Model         string       `json:"model"`
+	Reply         string       `json:"reply,omitempty"`
+	Problem       string       `json:"problem,omitempty"`
+	PreviewHint   string       `json:"previewHint,omitempty"`
+	KeepInHistory bool         `json:"keepInHistory,omitempty"`
+	Metrics       ReplyMetrics `json:"metrics,omitzero"`
 }
 
 // History stores transcripts for one configuration. Windows share one History.

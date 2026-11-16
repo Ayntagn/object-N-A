@@ -249,9 +249,9 @@ func (app *workspaceWindow) drawMultiFileMarkdown(c *mygoui.Context, tab *worksp
 		vault = tab.storage
 	}
 	if state.options == nil || state.vault != vault || state.path != note {
-		*state = multiFileMarkdownState{vault: vault, path: note, options: &markdown.Options{
+		*state = multiFileMarkdownState{vault: vault, path: note, options: withMarkdownCodeBadges(&markdown.Options{
 			Extensions: wysiwyg.Extensions, WrapCode: true,
-		}}
+		})}
 		state.options.OnLink = func(dest string) { app.openMultiFileLink(tab, dest) }
 		if vault != nil && note != "" {
 			state.options.LoadImage = func(dest string) (mygoui.ImageSource, error) {
@@ -272,6 +272,7 @@ func (app *workspaceWindow) drawMultiFileMarkdown(c *mygoui.Context, tab *worksp
 		theme := app.resolvePreviewTheme(tab.previewThemeID)
 		scroll.Background(mygoui.Hex(theme.BackgroundColor))
 		state.options.Theme = theme.markdownTheme(100, previewLineSpacing(source, app.preferences.Export.spacing()))
+		state.options.Theme.CodeColors = previewCodeTheme(theme.dark())
 	} else {
 		state.options.Theme = nil
 	}

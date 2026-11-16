@@ -29,8 +29,10 @@ func (app *workspaceWindow) loadAIHistory() (*aiworkspace.History, error) {
 }
 
 // EV-UI-245/250. The transcript belongs to the window and the list to the app.
+// EV-UI-305. The Vault context override follows the window and mounted Vault.
 func (s *workspaceAI) newConversation() {
 	s.stopResponse()
+	s.clearAIReferences()
 	s.prompt = ""
 	s.submitted = nil
 	s.conversationID = ""
@@ -62,7 +64,7 @@ func (app *workspaceWindow) saveAIConversation() {
 		if turn.model != "" {
 			additions = append(additions, aiworkspace.ConversationTurn{
 				Prompt: turn.prompt, Model: turn.model, Reply: turn.reply, Problem: turn.problem,
-				PreviewHint: turn.previewHint, KeepInHistory: turn.keepInHistory,
+				PreviewHint: turn.previewHint, KeepInHistory: turn.keepInHistory, Metrics: turn.metrics,
 			})
 		}
 	}
@@ -145,7 +147,7 @@ func (app *workspaceWindow) selectAIConversation(store *aiworkspace.History, id 
 		for _, turn := range record.Turns {
 			s.submitted = append(s.submitted, workspaceAITurn{
 				prompt: turn.Prompt, model: turn.Model, reply: turn.Reply, problem: turn.Problem,
-				contextHint: turn.PreviewHint, previewHint: turn.PreviewHint, keepInHistory: turn.KeepInHistory,
+				contextHint: turn.PreviewHint, previewHint: turn.PreviewHint, keepInHistory: turn.KeepInHistory, metrics: turn.Metrics,
 			})
 		}
 		s.conversationID, s.savedTurns = id, len(s.submitted)

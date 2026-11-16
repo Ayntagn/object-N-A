@@ -332,7 +332,20 @@ func (w *workspaceWYSIWYG) displayMathLanguages(c *mygoui.Context, app *workspac
 }
 
 func (w *workspaceWYSIWYG) displayMathKey(app *workspaceWindow, offset int, f *wysiwyg.Formula, state *visualDisplayMath, event mygoui.InputEvent) bool {
-	if event.Kind != mygoui.InputKeyDown || !w.editable(app) {
+	if !w.editable(app) {
+		return false
+	}
+	if w.math.newFence == f && w.math.newFenceVersion == w.session.Document.Version() &&
+		markdownShortcutUndo(event) && !state.source.Buffer.CanUndo() {
+		// The empty code editor has no edits yet. Undo its insertion in the
+		// containing document and restore the opening line's focus.
+		w.math.newFence = nil
+		w.session.Document.Undo()
+		w.sync(app)
+		w.focus = true
+		return true
+	}
+	if event.Kind != mygoui.InputKeyDown {
 		return false
 	}
 	text := state.source.Buffer.String()

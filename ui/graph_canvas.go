@@ -17,7 +17,7 @@ type graphCanvasOptions struct {
 	Compact, ColorByTag           bool
 	Shape                         graphShape
 	ActivePath, Tag               string
-	Highlight                     map[string]bool
+	Highlight                     map[string]float64
 }
 
 func (o graphCanvasOptions) cameraDistance() float64 {
@@ -76,6 +76,7 @@ type graphProjectedNote struct {
 	depth              float64
 	baseRadius, radius float32
 	matched            bool
+	searchWeight       float32
 }
 
 type graphCanvasDrag struct {
@@ -250,30 +251,32 @@ func (v *graphCanvas) markNeighbors(neighbors []bool, index int) {
 }
 
 // EV-UI-205. Hover temporarily takes over the active document's emphasis.
-func (v *graphCanvas) applyEmphasis(lexicalMatches bool) (focus int, neighbors []bool) {
+func (v *graphCanvas) applyEmphasis() (focus int, neighbors []bool) {
 	focus, neighbors = v.activeNote, v.nearActive
 	if v.hover >= 0 {
 		focus, neighbors = v.hover, v.nearHover
-		lexicalMatches = false
 	}
 	for i := range v.projected {
 		point := &v.projected[i]
-		point.radius = point.baseRadius * graphEmphasisScale(i == focus, neighbors[i], lexicalMatches && point.matched)
+		weight := point.searchWeight
+		if v.hover >= 0 {
+			weight = 0
+		}
+		point.radius = point.baseRadius * graphEmphasisScale(i == focus, neighbors[i], weight)
 	}
 	return focus, neighbors
 }
 
-func graphEmphasisScale(focused, neighbor, searchMatch bool) float32 {
+func graphEmphasisScale(focused, neighbor bool, searchWeight float32) float32 {
 	switch {
 	case focused:
 		return 1.7
 	case neighbor:
 		return 1.2
-	case searchMatch:
-		// EV-UI-187. A lexical result has weight 1.
-		return 2.4
 	default:
-		return 1
+		// EV-UI-187. A lexical result has weight 1. Related weights
+		// retain their relative strengths in both canvases.
+		return 1 + 1.4*searchWeight
 	}
 }
 
@@ -381,12 +384,12 @@ func (v *graphCanvas) project(p *mygoui.Painter, r mygoui.Rect, options graphCan
 			}
 			screen = projection.point(point)
 		}
-		matched := options.Highlight[note.Path]
+		weight, matched := options.Highlight[note.Path]
 		if !filteredBySearch && options.Tag != "" {
 			matched = slices.Contains(note.Tags, options.Tag)
 		}
 		v.projected[i] = graphProjectedNote{
-			point: screen, depth: depth, baseRadius: float32(radius), matched: matched,
+			point: screen, depth: depth, baseRadius: float32(radius), matched: matched, searchWeight: float32(weight),
 		}
 	}
 	return tourNote, projection
@@ -400,12 +403,11 @@ func (v *graphCanvas) paint(p *mygoui.Painter, r mygoui.Rect, options graphCanva
 	if tourNote >= 0 {
 		v.setHover(-1)
 	}
-	lexicalMatches := len(options.Highlight) > 0
-	focus, nearFocus := v.applyEmphasis(lexicalMatches)
+	focus, nearFocus := v.applyEmphasis()
 	// Hit the current projection with its existing emphasis before resolving
 	// a new hover. This covers both moving nodes and changes in magnification.
 	if tourNote < 0 && v.pointerInside && !v.drag.active && v.setHover(v.hit(v.pointer)) {
-		focus, nearFocus = v.applyEmphasis(lexicalMatches)
+		focus, nearFocus = v.applyEmphasis()
 	}
 	hovering := v.hover >= 0
 	normal, active := theme.Accent, theme.Accent

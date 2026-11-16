@@ -315,9 +315,12 @@ func (app *workspaceWindow) showSettings() {
 }
 
 func (app *workspaceWindow) openAISettings() {
+	enteringAI := app.settingsTab != "AI"
 	app.settingsTab = "AI"
-	app.prepareAIConnectionSettings()
 	if app.settings != nil && !app.settings.IsDestroyed() {
+		if enteringAI {
+			app.prepareAIConnectionSettings()
+		}
 		app.settings.Invalidate()
 	}
 	app.showSettings()
@@ -340,6 +343,9 @@ func (app *workspaceWindow) appearanceSettings(c *mygoui.Context) {
 				item := mygoui.ButtonBase(c.Key(page.id)).Label(label).AccessSelected(active).Height(36).
 					FillWidth().AlignItems(mygoui.Center).Justify(mygoui.Start).Gap(12).Padding(0, 14).Radius(7).
 					OnClick(func() {
+						if app.settingsTab == page.id {
+							return
+						}
 						app.settingsTab = page.id
 						if page.id == "AI" {
 							app.prepareAIConnectionSettings()

@@ -15,18 +15,18 @@ import (
 	"golang.org/x/net/http/httpguts"
 )
 
-// Config identifies the service, its chosen model and an optional bearer token.
+// Config identifies the service, its chosen model and its API key.
 type Config struct {
 	BaseURL string
 	Model   string
 	APIKey  string
 }
 
-// Normalize trims form values and validates the HTTP service and bearer key.
+// Normalize trims form values and validates the HTTP service and API key.
 // Model discovery does not require a selected model.
 func Normalize(config Config) (Config, error) {
-	normalized, _, err := normalize(config)
-	return normalized, err
+	connection, err := normalize(config)
+	return connection.config, err
 }
 
 // Message is one turn of the conversation sent to the configured service.
@@ -35,7 +35,16 @@ type Message struct {
 	Content string `json:"content"`
 }
 
-const maxResponseBytes = 4 << 20
+const (
+	maxResponseBytes    = 4 << 20
+	anthropicHost       = "api.anthropic.com"
+	anthropicAPIVersion = "2023-06-01"
+)
+
+type serviceConnection struct {
+	config Config
+	base   *url.URL
+}
 
 var (
 	errInvalidURL         = errors.New("Enter a valid HTTP or HTTPS Base URL")
@@ -79,32 +88,50 @@ func originPort(endpoint *url.URL) string {
 	return "80"
 }
 
-func normalize(config Config) (Config, *url.URL, error) {
+func normalize(config Config) (serviceConnection, error) {
 	config.BaseURL = strings.TrimSpace(config.BaseURL)
 	config.Model = strings.TrimSpace(config.Model)
 	config.APIKey = strings.TrimSpace(config.APIKey)
 	base, err := url.Parse(config.BaseURL)
 	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Hostname() == "" || base.User != nil || base.Fragment != "" {
-		return Config{}, nil, errInvalidURL
+		return serviceConnection{}, errInvalidURL
 	}
 	if !httpguts.ValidHeaderFieldValue(config.APIKey) {
-		return Config{}, nil, errInvalidKey
+		return serviceConnection{}, errInvalidKey
 	}
-	return config, base, nil
+	return serviceConnection{config: config, base: base}, nil
 }
 
-func openResponse(ctx context.Context, config Config, method, route, accept string, payload []byte) (*http.Response, error) {
-	config, base, err := normalize(config)
-	if err != nil {
-		return nil, err
+func (c serviceConnection) isAnthropic() bool {
+	return strings.EqualFold(c.base.Hostname(), anthropicHost)
+}
+
+func (c serviceConnection) endpoint(route string) string {
+	if c.isAnthropic() {
+		return "https://" + anthropicHost + "/v1/" + route
 	}
-	endpoint := base.JoinPath(route)
-	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), bytes.NewReader(payload))
+	return c.base.JoinPath(route).String()
+}
+
+func (c serviceConnection) completionRoute() string {
+	if c.isAnthropic() {
+		return "messages"
+	}
+	return "chat/completions"
+}
+
+func (c serviceConnection) openResponse(ctx context.Context, method, route, accept string, payload []byte) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint(route), bytes.NewReader(payload))
 	if err != nil {
 		return nil, errInvalidURL
 	}
-	if config.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+config.APIKey)
+	if key := c.config.APIKey; key != "" {
+		if c.isAnthropic() {
+			req.Header.Set("x-api-key", key)
+			req.Header.Set("anthropic-version", anthropicAPIVersion)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+key)
+		}
 	}
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")

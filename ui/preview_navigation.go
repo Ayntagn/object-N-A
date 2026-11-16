@@ -221,7 +221,8 @@ func (m *previewMarkup) embedParagraph(in []parser.Inline, anchor string) bool {
 		return true
 	}
 	_, _, body := workspace.SplitFrontmatter(doc.Text)
-	child := previewMarkup{doc: parser.New(m.doc.Extensions()), resources: res, relative: relative, embedded: true, charts: m.charts, figures: m.figures}
+	child := previewMarkup{doc: parser.New(m.doc.Extensions()), resources: res, relative: relative, embedded: true,
+		charts: m.charts, figures: m.figures, codeTheme: m.codeTheme, codeCopies: m.codeCopies}
 	setPreviewDocument(child.doc, body)
 	child.blocks(0)
 	fmt.Fprintf(&m.out, `<aside class="note-embed"%s>`, anchor)

@@ -14,14 +14,22 @@ const aiContextWidth, aiContextHeight = 420, 450
 // EV-UI-267: one open document owns its Notes and attachment, including
 // when the tab moves to a different window.
 type workspaceAIContext struct {
-	documentPath string
-	snapshot     string
-	characters   int
-	notes        string
+	documentPath   string
+	snapshot       string
+	characters     int
+	characterLimit int
+	notes          string
 }
 
 func (context *workspaceAIContext) hasNotes() bool {
 	return strings.TrimSpace(context.notes) != ""
+}
+
+func (context *workspaceAIContext) limitWarning(language workspaceLanguage) string {
+	if context.snapshot == "" || context.characterLimit <= 0 || context.characters <= context.characterLimit {
+		return ""
+	}
+	return language.text("Document context exceeds the selected limit. This request uses the full text.", "文档上下文超过所选上限。本次请求将使用全文。")
 }
 
 func (app *workspaceWindow) activeAIContext() *workspaceAIContext {
@@ -68,6 +76,7 @@ func (app *workspaceWindow) showAIContext(anchor mygoui.Rect) {
 		return
 	}
 	snapshot, characters := context.snapshot, context.characters
+	warning := context.limitWarning(app.interfaceLanguage())
 	var flyout *mygo.Window
 	flyout = mygo.NewFlyout(mygo.FlyoutOptions{
 		Parent: app.win, Anchor: documentTitleAnchor(anchor),
@@ -76,10 +85,7 @@ func (app *workspaceWindow) showAIContext(anchor mygoui.Rect) {
 		Content: mygoui.View(func(c *mygoui.Context) {
 			app.applyAppearance(c)
 			c.Root().Background(mygoui.Transparent)
-			surface := drawAIContextReader(c, app.blackout, snapshot, characters, &context.notes, func() { flyout.Close() }, app.invalidateAIChat)
-			if !c.Vibrancy() {
-				surface.Background(c.Theme().Surface).Radius(16)
-			}
+			drawAIContextReader(c, app.blackout, snapshot, characters, warning, &context.notes, func() { flyout.Close() }, app.invalidateAIChat)
 		}),
 	})
 	if flyout == nil {
@@ -93,16 +99,24 @@ func (app *workspaceWindow) showAIContext(anchor mygoui.Rect) {
 	})
 }
 
-func drawAIContextReader(c *mygoui.Context, blackout bool, snapshot string, characters int, notes *string, closeReader, notesChanged func()) mygoui.Element {
+func drawAIContextReader(c *mygoui.Context, blackout bool, snapshot string, characters int, warning string, notes *string, closeReader, notesChanged func()) mygoui.Element {
 	colors := aiWorkspaceColors(c, blackout)
 	blackoutReader := blackout && !c.Preferences().HighContrast
 	documentInk, notesInk, copyInk, notesFill := colors.link, colors.link, colors.link, colors.guide
 	reader := mygoui.Column(c).Fill().Padding(12, 8)
+	if !c.Vibrancy() {
+		fill := c.Theme().Surface
+		if blackoutReader {
+			// EV-UI-310: use the measured body tone for the solid-color fallback.
+			fill = mygoui.Hex("#27272a")
+		}
+		reader.Background(fill).Radius(16)
+	}
 	if blackoutReader {
 		// EV-UI-261. These separators span the popover client area and do
 		// not take space from either text field.
 		documentInk, notesInk = mygoui.Hex("#3ae866"), mygoui.Hex("#d4d6e0")
-		copyInk, notesFill = mygoui.Hex("#909090"), mygoui.Hex("#060608")
+		copyInk, notesFill = mygoui.Hex("#909090"), mygoui.Hex("#030306")
 		reader.DrawOver(func(p *mygoui.Painter, bounds mygoui.Rect) {
 			rule := mygoui.RGBA(255, 255, 255, .12)
 			for _, offset := range [...]float32{40, bounds.H - 152, bounds.H - 45} {
@@ -122,9 +136,23 @@ func drawAIContextReader(c *mygoui.Context, blackout bool, snapshot string, char
 			mygoui.Spacer(c)
 			mygoui.Text(c, strconv.Itoa(characters)+" chars").FontSize(12).TextColor(colors.muted)
 		})
+		bodyInset := float32(17)
+		if warning != "" {
+			mygoui.Row(c.Key("context limit warning")).Margin(17, 4, 0).Shrink(0).
+				Gap(5).AlignItems(mygoui.Start).Children(func() {
+				aiWorkspaceIcon(c, "info.circle.fill", "info", 10, colors.warningInk)
+				mygoui.Text(c, warning).Grow(1).MinWidth(0).FontSize(11).FixedLineHeight(14).
+					TextColor(colors.warningInk).Role(mygoui.RoleStatus)
+			})
+			bodyInset = 4
+		}
 		body := mygoui.TextArea(c.Key("AI context contents"), &snapshot).FillWidth().Grow(1).MinHeight(0).
-			Margin(17, 0, 10).Padding(8, 10).Label("Attached context").ReadOnly(true).
+			Margin(bodyInset, 0, 10).Padding(8, 10).Label("Attached context").ReadOnly(true).
 			Font("monospace").FontSize(12).TextColor(colors.text).Background(colors.guide).Border(0, mygoui.Transparent).Radius(7)
+		if blackoutReader {
+			// EV-UI-310: align the text inside the already matched field bounds.
+			body.Padding(0, 5).FontSize(11).Background(mygoui.Transparent)
+		}
 		if snapshot == "" {
 			body.Background(mygoui.Transparent)
 			opened := mygoui.Local(body, "AI context initial focus", func() bool { return false })

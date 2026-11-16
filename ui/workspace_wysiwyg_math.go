@@ -14,14 +14,16 @@ const visualMathMargin = 4
 const visualMathMono = "SF Mono, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
 
 type visualMathState struct {
-	inline         map[string]visualInlineBox
-	layoutRevision uint8
-	popup          visualInlinePopup
-	input          visualMathInput
-	focusBlock     string
-	hidden         map[string]bool
-	activeSource   *visualDisplayMath
-	appearance     visualBlockColors
+	inline          map[string]visualInlineBox
+	layoutRevision  uint8
+	popup           visualInlinePopup
+	input           visualMathInput
+	focusBlock      string
+	newFence        *wysiwyg.Formula
+	newFenceVersion uint64
+	hidden          map[string]bool
+	activeSource    *visualDisplayMath
+	appearance      visualBlockColors
 }
 
 type visualInlineBox struct {

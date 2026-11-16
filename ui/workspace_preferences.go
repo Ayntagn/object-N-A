@@ -10,61 +10,76 @@ import (
 	"slices"
 
 	"cyberwriter/internal/core/mdshortcuts"
+	"cyberwriter/internal/core/vaultcontext"
 	"cyberwriter/internal/core/workspace"
 	"github.com/egoist/mygo"
 )
 
 type workspacePreferences struct {
-	InterfaceLanguage         workspaceLanguage           `json:"interfaceLanguage,omitempty"`
-	Appearance                workspaceAppearance         `json:"appAppearance"`
-	PreviewThemeID            string                      `json:"selectedThemeId"`
-	UserStylesheetEnabled     bool                        `json:"userStylesheetEnabled,omitempty"`
-	LineNumbers               bool                        `json:"lineNumbers"`
-	TypewriterMode            bool                        `json:"typewriterMode"`
-	TypewriterPosition        float64                     `json:"typewriterPosition"`
-	AutoIndentParagraphs      bool                        `json:"autoIndentParagraphs,omitempty"`
-	MarkdownShortcuts         mdshortcuts.Config          `json:"markdownShortcuts,omitzero"`
-	FontSize                  int                         `json:"fontSize"`
-	EditorFont                string                      `json:"editorFontFamily,omitempty"`
-	EditorLineHeight          float64                     `json:"editorLineHeight,omitempty"`
-	EditorTheme               string                      `json:"editorThemeRawValue,omitempty"`
-	DisableSyntaxHighlighting bool                        `json:"debugDisableHighlighting,omitempty"`
-	SpellCheckEnabled         bool                        `json:"spellCheckEnabled"`
-	CollapseHexColors         bool                        `json:"collapseHexColors,omitempty"`
-	PreferredInputDeviceUID   string                      `json:"preferredInputDeviceUID,omitempty"`
-	AIStreamIntoEditor        bool                        `json:"aiStreamIntoEditor"`
-	AIConnection              workspaceAISavedConnection  `json:"aiConnection,omitzero"`
-	AIChatRawText             bool                        `json:"aiChatRawText,omitempty"`
-	AIPanelRight              bool                        `json:"aiPanelOnRight,omitempty"`
-	ShowWelcomeOnLaunch       bool                        `json:"showWelcomeOnLaunch,omitempty"`
-	RecentDocuments           []string                    `json:"recentDocuments,omitempty"`
-	ScrollSyncEnabled         bool                        `json:"scrollSyncEnabled"`
-	UseLineBasedScrollSync    bool                        `json:"useLineBasedScrollSync"`
-	ScrollPastEnd             bool                        `json:"scrollPastEnd"`
-	PDFPreviewGridLayout      bool                        `json:"pdfPreviewGridLayout"`
-	NumberFigures             bool                        `json:"numberFigures,omitempty"`
-	ShowExtension             bool                        `json:"showExtension"`
-	VaultShowAllFiles         bool                        `json:"vaultShowAllFiles,omitempty"`
-	VaultFileOrders           map[string]vaultFileOrder   `json:"vaultFileOrders,omitempty"`
-	SidebarClickNewWindow     bool                        `json:"sidebarClickNewWindow,omitempty"`
-	DrawingsOpenSeparately    bool                        `json:"drawingsOpenSeparately"`
-	NewInVault                bool                        `json:"newInVault"`
-	DefaultView               int                         `json:"defaultView"`
-	Graph3D                   bool                        `json:"graphInline3D,omitempty"`
-	GraphClustered            bool                        `json:"graphClustered"`
-	GraphColorNodesByTag      bool                        `json:"graphColorNodesByTag"`
-	GraphShowStats            bool                        `json:"graphShowStats,omitempty"`
-	GraphShape                graphShape                  `json:"graphShape,omitempty"`
-	TagsColoredByHash         bool                        `json:"tagsColoredByHash"`
-	VaultTagsExpanded         bool                        `json:"vaultTagsExpanded,omitempty"`
-	VaultBacklinksExpanded    bool                        `json:"vaultBacklinksExpanded,omitempty"`
-	VaultMentionsExpanded     bool                        `json:"vaultMentionsExpanded,omitempty"`
-	Terminal                  glowPreferences             `json:"terminal"`
-	WindowStates              map[string]mygo.WindowState `json:"windowStates,omitempty"`
-	Export                    workspaceExportPreferences  `json:"export"`
-	RecentVaults              []string                    `json:"recentVaults,omitempty"`
-	APIAllowedHosts           []string                    `json:"apiAllowedHosts,omitempty"`
-	Session                   savedSession                `json:"session"`
+	InterfaceLanguage           workspaceLanguage           `json:"interfaceLanguage,omitempty"`
+	Appearance                  workspaceAppearance         `json:"appAppearance"`
+	PreviewThemeID              string                      `json:"selectedThemeId"`
+	UserStylesheetEnabled       bool                        `json:"userStylesheetEnabled,omitempty"`
+	LineNumbers                 bool                        `json:"lineNumbers"`
+	TypewriterMode              bool                        `json:"typewriterMode"`
+	TypewriterPosition          float64                     `json:"typewriterPosition"`
+	AutoIndentParagraphs        bool                        `json:"autoIndentParagraphs,omitempty"`
+	MarkdownShortcuts           mdshortcuts.Config          `json:"markdownShortcuts,omitzero"`
+	FontSize                    int                         `json:"fontSize"`
+	EditorFont                  string                      `json:"editorFontFamily,omitempty"`
+	EditorLineHeight            float64                     `json:"editorLineHeight,omitempty"`
+	EditorTheme                 string                      `json:"editorThemeRawValue,omitempty"`
+	DisableSyntaxHighlighting   bool                        `json:"debugDisableHighlighting,omitempty"`
+	SpellCheckEnabled           bool                        `json:"spellCheckEnabled"`
+	CollapseHexColors           bool                        `json:"collapseHexColors,omitempty"`
+	PreferredInputDeviceUID     string                      `json:"preferredInputDeviceUID,omitempty"`
+	AIStreamIntoEditor          bool                        `json:"aiStreamIntoEditor"`
+	AIConnection                workspaceAISavedConnection  `json:"aiConnection,omitzero"`
+	AISystemPrompt              *string                     `json:"aiSystemPrompt,omitempty"`
+	AIProfiles                  []workspaceAIProfile        `json:"aiProfiles"`
+	AIActiveProfile             string                      `json:"aiActiveProfile,omitempty"`
+	AIContextLimitPreset        string                      `json:"aiContextLimitPreset,omitempty"`
+	AICustomContextLimit        int                         `json:"aiCustomContextLimit,omitempty"`
+	AIContextMessageLimit       int                         `json:"aiContextMessageLimit,omitempty"`
+	AIChatRawText               bool                        `json:"aiChatRawText,omitempty"`
+	AIVaultContextEnabled       bool                        `json:"aiVaultContextEnabled,omitempty"`
+	AIVaultContextAutoUpdate    *bool                       `json:"aiVaultContextAutoUpdate,omitempty"`
+	AIVaultContextSendStructure bool                        `json:"aiVaultContextSendStructure,omitempty"`
+	AIVaultContextDepth         vaultcontext.Depth          `json:"aiVaultContextDepth,omitempty"`
+	AIPanelRight                bool                        `json:"aiPanelOnRight,omitempty"`
+	ShowWelcomeOnLaunch         bool                        `json:"showWelcomeOnLaunch,omitempty"`
+	ShowSplashOnLaunch          bool                        `json:"showSplashOnLaunch"`
+	SplashLastHostFrame         mygo.Rectangle              `json:"splashLastHostFrame,omitzero"`
+	RecentDocuments             []string                    `json:"recentDocuments,omitempty"`
+	ScrollSyncEnabled           bool                        `json:"scrollSyncEnabled"`
+	UseLineBasedScrollSync      bool                        `json:"useLineBasedScrollSync"`
+	ScrollPastEnd               bool                        `json:"scrollPastEnd"`
+	PDFPreviewGridLayout        bool                        `json:"pdfPreviewGridLayout"`
+	NumberFigures               bool                        `json:"numberFigures,omitempty"`
+	ShowExtension               bool                        `json:"showExtension"`
+	VaultShowAllFiles           bool                        `json:"vaultShowAllFiles,omitempty"`
+	VaultFileOrders             map[string]vaultFileOrder   `json:"vaultFileOrders,omitempty"`
+	SidebarClickNewWindow       bool                        `json:"sidebarClickNewWindow,omitempty"`
+	DrawingsOpenSeparately      bool                        `json:"drawingsOpenSeparately"`
+	NewInVault                  bool                        `json:"newInVault"`
+	DefaultView                 int                         `json:"defaultView"`
+	Graph3D                     bool                        `json:"graphInline3D,omitempty"`
+	GraphClustered              bool                        `json:"graphClustered"`
+	GraphColorNodesByTag        bool                        `json:"graphColorNodesByTag"`
+	GraphShowStats              bool                        `json:"graphShowStats,omitempty"`
+	GraphShape                  graphShape                  `json:"graphShape,omitempty"`
+	TagsColoredByHash           bool                        `json:"tagsColoredByHash"`
+	VaultTagsExpanded           bool                        `json:"vaultTagsExpanded,omitempty"`
+	VaultBacklinksExpanded      bool                        `json:"vaultBacklinksExpanded,omitempty"`
+	VaultMentionsExpanded       bool                        `json:"vaultMentionsExpanded,omitempty"`
+	Terminal                    glowPreferences             `json:"terminal"`
+	WindowStates                map[string]mygo.WindowState `json:"windowStates,omitempty"`
+	Export                      workspaceExportPreferences  `json:"export"`
+	RecentVaults                []string                    `json:"recentVaults,omitempty"`
+	APIAllowedHosts             []string                    `json:"apiAllowedHosts,omitempty"`
+	Session                     savedSession                `json:"session"`
+
+	VaultEmbeddingsOfferDecisions map[string]string `json:"vaultEmbeddingsOfferDecisions,omitempty"`
 }
 
 type savedSession struct {
@@ -104,6 +119,7 @@ func loadWorkspacePreferences() (workspacePreferences, error) {
 		ScrollSyncEnabled: true, ScrollPastEnd: true, AIStreamIntoEditor: true,
 		SpellCheckEnabled:      true,
 		DrawingsOpenSeparately: true,
+		ShowSplashOnLaunch:     true,
 		GraphClustered:         true, GraphShape: graphAuto, GraphColorNodesByTag: true, TagsColoredByHash: true,
 		Terminal: (glowPreferences{}).normalized(),
 		Export:   workspaceExportPreferences{RememberLocation: true},
@@ -157,6 +173,7 @@ func loadWorkspacePreferences() (workspacePreferences, error) {
 	preferences.EditorTheme = sourceThemeForID(preferences.EditorTheme).id
 	preferences.GraphShape = preferences.GraphShape.choice().id
 	preferences.Terminal = preferences.Terminal.normalized()
+	preferences.migrateAIProfiles()
 	return preferences, nil
 }
 

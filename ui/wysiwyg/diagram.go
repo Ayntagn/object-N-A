@@ -86,12 +86,18 @@ func (s *Session) InsertVegaChart(source string) bool {
 }
 
 func (s *Session) insertStandalone(object *richtext.Attachment, caretID string, selectBlock bool) bool {
+	if s.Document == nil {
+		return false
+	}
+	a, z := s.Document.Selection()
+	return s.insertStandaloneAt(object, caretID, selectBlock, min(a, z), max(a, z))
+}
+
+func (s *Session) insertStandaloneAt(object *richtext.Attachment, caretID string, selectBlock bool, start, end int) bool {
 	if s.Document == nil || !s.Current(s.draft) {
 		return false
 	}
 	text := s.Document.Text()
-	a, z := s.Document.Selection()
-	start, end := min(a, z), max(a, z)
 	paragraphStart, _ := text.ParagraphRange(start)
 	_, paragraphEnd := text.ParagraphRange(end)
 	for offset := paragraphStart; offset <= end; {

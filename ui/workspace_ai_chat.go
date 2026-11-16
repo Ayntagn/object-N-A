@@ -2,8 +2,10 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"cyberwriter/internal/core/aiworkspace"
 	"github.com/egoist/mygo"
@@ -16,12 +18,14 @@ type workspaceAITurn struct {
 	previewHint                string
 	keepInHistory              bool
 	contextOwner               *workspaceAIContext
+	metrics                    aiworkspace.ReplyMetrics
 }
 
 type workspaceAIRequest struct {
 	cancel          context.CancelFunc
 	turn            int
 	reply           strings.Builder
+	progress        aiworkspace.StreamProgress
 	writeback       *workspaceAIWriteback
 	visualWriteback *workspaceAIVisualWriteback
 	finishVisual    func(string)
@@ -30,11 +34,13 @@ type workspaceAIRequest struct {
 
 func (s *workspaceAI) stopResponse() {
 	if request := s.request; request != nil {
+		stoppedAt := time.Now()
 		request.cancel()
 		s.request = nil
 		// EV-UI-242: a stopped turn's received text remains in the next request.
 		turn := &s.submitted[request.turn]
 		turn.keepInHistory = turn.reply != ""
+		turn.metrics = request.progress.MetricsAt(stoppedAt)
 		if request.finishVisual != nil {
 			request.finishVisual(turn.reply)
 		}
@@ -48,13 +54,19 @@ func (app *workspaceWindow) submitAIChat(prompt string) bool {
 	s := &app.ai
 	prompt = strings.TrimSpace(prompt)
 	saved := app.preferences.AIConnection
-	if prompt == "" || s.request != nil || saved.Model == "" {
+	if prompt == "" || s.request != nil || s.referenceLoad != nil || saved.Model == "" {
 		return false
 	}
 	owner := app.activeAIContext()
 	previewHint := app.aiChatPreviewHint()
 	hint := app.aiChatContextHint(previewHint)
-	messages := s.chatMessages(owner, hint, prompt)
+	requestHint := hint
+	if len(s.references) > 0 {
+		requestHint = app.aiChatContextHint(previewHint, s.references...)
+	}
+	messages := app.chatMessages(owner, requestHint, prompt)
+	vaultQuery := app.aiVaultContextQuery(saved)
+	s.clearAIReferences()
 	app.clearAIContext()
 	if app.workspaceTab != nil {
 		s.rememberConversationDocument(app.document.Path)
@@ -91,10 +103,11 @@ func (app *workspaceWindow) submitAIChat(prompt string) bool {
 	}
 	go func() {
 		defer cancel()
-		reply, err := aiworkspace.Chat(ctx, cfg, messages, func(delta string) {
+		deliverDelta := func(delta string, progress aiworkspace.StreamProgress) {
 			mygo.RunOnMain(func() {
 				if s.request == request {
 					request.reply.WriteString(delta)
+					request.progress = progress
 					reply := request.reply.String()
 					if request.writeback != nil && !request.writeback.apply(app, reply) {
 						request.writeback = nil
@@ -107,18 +120,23 @@ func (app *workspaceWindow) submitAIChat(prompt string) bool {
 					app.invalidateAIChat()
 				}
 			})
-		})
+		}
+		var reply aiworkspace.ChatReply
+		err := vaultQuery.appendToMessages(ctx, prompt, previewHint, messages)
+		if err == nil {
+			reply, err = aiworkspace.Chat(ctx, cfg, messages, deliverDelta)
+		}
 		mygo.RunOnMain(func() {
 			if s.request != request {
 				return
 			}
 			turn := &s.submitted[turnIndex]
-			turn.reply, turn.keepInHistory = reply, err == nil
+			turn.reply, turn.metrics, turn.keepInHistory = reply.Text, reply.Metrics, err == nil
 			if request.finishVisual != nil {
 				if err != nil {
 					request.finishVisual("")
 				} else {
-					request.finishVisual(reply)
+					request.finishVisual(reply.Text)
 				}
 			}
 			if err != nil {
@@ -133,10 +151,10 @@ func (app *workspaceWindow) submitAIChat(prompt string) bool {
 	return true
 }
 
-func (s *workspaceAI) chatMessages(owner *workspaceAIContext, hint, prompt string) []aiworkspace.Message {
-	messages := make([]aiworkspace.Message, 0, 3*len(s.submitted)+3)
-	messages = append(messages, aiworkspace.Message{Role: "system", Content: workspaceAIWritingInstructions})
-	for _, turn := range s.submitted {
+func (app *workspaceWindow) chatMessages(owner *workspaceAIContext, hint, prompt string) []aiworkspace.Message {
+	messages := make([]aiworkspace.Message, 0, 3*len(app.ai.submitted)+3)
+	messages = append(messages, aiworkspace.Message{Role: "system", Content: app.preferences.aiSystemPrompt()})
+	for _, turn := range app.ai.submitted {
 		if !turn.keepInHistory {
 			continue
 		}
@@ -152,8 +170,14 @@ func (s *workspaceAI) chatMessages(owner *workspaceAIContext, hint, prompt strin
 		messages = append(messages, aiworkspace.Message{Role: "user", Content: turn.prompt},
 			aiworkspace.Message{Role: "assistant", Content: turn.reply})
 	}
-	return append(messages, aiworkspace.Message{Role: "system", Content: hint},
+	messages = append(messages, aiworkspace.Message{Role: "system", Content: hint},
 		aiworkspace.Message{Role: "user", Content: prompt})
+	// EV-UI-282. The current turn counts toward the limit. The service's default
+	// system instructions precede the retained messages and are counted separately.
+	if limit := app.preferences.contextMessageLimit(); len(messages)-1 > limit {
+		messages = append(messages[:1], messages[len(messages)-limit:]...)
+	}
+	return messages
 }
 
 const workspaceAIWritingInstructions = "You are the writing assistant in object-N/A, a Markdown editor. " +
@@ -186,6 +210,7 @@ func (app *workspaceWindow) attachAIContext() {
 		characters++
 	}
 	owner.snapshot, owner.characters = source, characters
+	owner.characterLimit = app.preferences.documentContextLimit()
 }
 
 func (app *workspaceWindow) clearAIContext() {
@@ -213,8 +238,8 @@ func (app *workspaceWindow) aiChatPreviewHint() string {
 		contrast + ". Keep generated HTML readable when the preview theme changes. Let the editor theme Mermaid diagrams."
 }
 
-// EV-UI-231 / EV-UI-242: each turn has a preview hint and one optional note context.
-func (app *workspaceWindow) aiChatContextHint(hint string) string {
+// EV-UI-231 / EV-UI-242 / EV-UI-277. References belong to this request's context.
+func (app *workspaceWindow) aiChatContextHint(previewHint string, references ...workspaceAIReference) string {
 	owner := app.activeAIContext()
 	var source string
 	if owner != nil {
@@ -223,13 +248,18 @@ func (app *workspaceWindow) aiChatContextHint(hint string) string {
 	if source == "" {
 		source = app.aiSourceSelection()
 	}
+	parts := make([]string, 0, len(references)+3)
 	if source != "" {
-		hint += "\n\nUse the following Markdown as source material:\n" + source
+		parts = append(parts, "Use the following Markdown as source material:\n"+source)
+	}
+	for _, reference := range references {
+		parts = append(parts, fmt.Sprintf("Attached file \"%s\":\n\n%s", reference.name, reference.content))
 	}
 	if owner != nil && owner.hasNotes() {
-		hint += "\n\nAdditional notes for this conversation:\n" + owner.notes
+		parts = append(parts, "Additional notes for this conversation:\n"+owner.notes)
 	}
-	return hint
+	parts = append(parts, previewHint)
+	return strings.Join(parts, "\n\n---\n\n")
 }
 
 func (app *workspaceWindow) invalidateAIChat() {

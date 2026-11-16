@@ -60,24 +60,29 @@ func (app *workspaceWindow) settingsSwitch(c *mygoui.Context, title, detail, sym
 
 func (app *workspaceWindow) settingsSwitchOnChange(c *mygoui.Context, title, detail, symbol string, height float32, value *bool, changed func()) {
 	settingsRow(c, title, detail, symbol, height, func() {
-		if !app.blackout || c.Preferences().HighContrast {
-			mygoui.Switch(c.Key(title), value).Label(title).Size(36, 20).Shrink(0).OnChange(changed)
-			return
-		}
-		switcher := mygoui.SwitchBase(c.Key(title), value).Label(title).Size(36, 20).Shrink(0).
-			FocusRing(true).OnChange(changed)
-		var target float32
-		if *value {
-			target = 1
-		}
-		position := switcher.Animate("settings switch thumb", target, 140*time.Millisecond)
-		switcher.Radius(10).Background(mygoui.Hex("#292a3f").Mix(blackoutSettingsAccent, position)).
-			Draw(func(p *mygoui.Painter, rect mygoui.Rect) {
-				thumb := mygoui.Rect{X: rect.X + 2 + (rect.W-20)*position, Y: rect.Y + 2, W: 16, H: 16}
-				p.Shadow(thumb, 8, 0, 1, 3, 0, mygoui.RGBA(0, 0, 0, .23))
-				p.Fill(thumb, mygoui.RGB(255, 255, 255), 8)
-			})
+		app.settingsToggle(c.Key(title), title, value, changed)
 	})
+}
+
+func (app *workspaceWindow) settingsToggle(c *mygoui.Context, label string, value *bool, changed func()) {
+	if !app.blackout || c.Preferences().HighContrast {
+		mygoui.Switch(c, value).Label(label).Size(36, 20).Shrink(0).OnChange(changed)
+		return
+	}
+	switcher := mygoui.SwitchBase(c, value).Label(label).Size(36, 20).Shrink(0).
+		FocusRing(true).OnChange(changed)
+	var target float32
+	if *value {
+		target = 1
+	}
+	position := switcher.Animate("settings switch thumb", target, 140*time.Millisecond)
+	// EV-UI-312: the shared Settings style uses this track color when off.
+	switcher.Radius(10).Background(mygoui.Hex("#2b2d42").Mix(blackoutSettingsAccent, position)).
+		Draw(func(p *mygoui.Painter, rect mygoui.Rect) {
+			thumb := mygoui.Rect{X: rect.X + 2 + (rect.W-20)*position, Y: rect.Y + 2, W: 16, H: 16}
+			p.Shadow(thumb, 8, 0, 1, 3, 0, mygoui.RGBA(0, 0, 0, .23))
+			p.Fill(thumb, mygoui.RGB(255, 255, 255), 8)
+		})
 }
 
 func (app *workspaceWindow) settingsSegments(c *mygoui.Context, label string, options []string, width float32, selected int, onChange func(int)) {

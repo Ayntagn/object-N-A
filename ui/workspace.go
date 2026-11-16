@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"cyberwriter/internal/core/aiworkspace"
 	"cyberwriter/internal/core/workspace"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui/editor"
@@ -42,8 +43,14 @@ type workspaceWindow struct {
 	vaultVisible        bool
 	sidebarTab          workspaceSidebarTab
 	ai                  workspaceAI
+	aiVaultContext      *workspaceAIVaultContext
+	aiVaultBuildSheet   *workspaceAIVaultBuildSheet
+	aiVaultMapBusy      bool
+	aiVaultMapProblem   string
 	aiConnectionForm    workspaceAIConnectionForm
 	aiSettingsPrepared  bool
+	aiServiceRequest    *aiSettingsRequest
+	aiServiceResults    []aiworkspace.LocalServiceResult
 	aiModelRequest      *aiSettingsRequest
 	aiTestRequest       *aiSettingsRequest
 	fileSearch          string
@@ -64,6 +71,9 @@ type workspaceWindow struct {
 	vaultGuideOpen      bool
 	vaultSetup          *vaultSetupState
 
+	vaultEmbeddingOfferPath string
+	deferredVaultOffers     map[string]bool
+
 	*workspaceTab
 	tabs            []*workspaceTab
 	revealActiveTab bool
@@ -80,6 +90,7 @@ type workspaceWindow struct {
 	pdfPreview              workspacePDFPreview
 	snippets                workspaceSnippets
 	markdownShortcutSession markdownShortcutSession
+	sourceFence             sourceFenceCompletion
 	templates               workspaceTemplates
 	commandPalette          workspaceCommandPalette
 	quickSwitcher           workspaceQuickSwitcher
@@ -98,7 +109,10 @@ type workspaceWindow struct {
 type workspaceTab struct {
 	document              workspace.Document
 	templateTitle         string
+	initialEmptyTab       bool
+	startTitleFromSource  bool
 	inspection            bool
+	userGuide             bool
 	largePreview          workspaceLargePreview
 	storage               *workspace.Vault // An individually opened note outside the Vault.
 	folderRoot            string
@@ -116,6 +130,8 @@ type workspaceTab struct {
 	outlineCache          outlineCache
 	wys                   workspaceWYSIWYG
 	previewAnchor         string
+	previewRevealLine     int
+	pendingConceptExcerpt string
 	previewThemeID        string
 	quickPDFStylesheet    string
 	quickPDFForm          exportPageForm
@@ -147,16 +163,28 @@ func Run(initialVault string) error {
 		if opened {
 			application.restoreSession(app, preferences.Session)
 		}
+		if app.draft == nil && app.drawing == nil {
+			app.setTabDocument(app.workspaceTab, workspace.Document{})
+			app.initialEmptyTab = true
+			app.activateTab(app.workspaceTab)
+		}
 		if preferencesErr != nil && app.problem == "" {
 			app.problem = fmt.Sprintf("Could not load workspace settings. %v", preferencesErr)
 		}
-		app.win.Show()
 		application.activate(app)
 		if opened {
 			app.persistSession()
 		}
-		if preferences.ShowWelcomeOnLaunch {
-			app.showWelcome()
+		welcome := func() {
+			if application.preferences.ShowWelcomeOnLaunch && !app.win.IsDestroyed() {
+				app.showWelcome()
+			}
+		}
+		if preferences.ShowSplashOnLaunch {
+			application.playSplash(app.win, true, welcome)
+		} else {
+			app.win.Show()
+			welcome()
 		}
 	})
 	err := mygo.App.Run()
@@ -213,6 +241,7 @@ func (app *workspaceWindow) applyVault(abs string, vault *workspace.Vault, entri
 	app.wys.sync(app)
 	app.dismissQuickSwitcher()
 	previous := app.vault
+	previousContextRoot := app.aiVaultContextRoot()
 	if restoredExample {
 		app.rebindExampleTabs(abs, vault)
 	}
@@ -226,6 +255,19 @@ func (app *workspaceWindow) applyVault(abs string, vault *workspace.Vault, entri
 		}
 	}
 	app.vault, app.root = vault, abs
+	app.vaultEmbeddingOfferPath = normalizedVaultEmbeddingOfferPath(abs)
+	if previousContextRoot != app.aiVaultContextRoot() {
+		app.ai.vaultContextOverride = nil
+		app.detachAIVaultContext(previousContextRoot)
+	} else if previous != vault {
+		state := app.aiVaultContextState()
+		if state.request != nil && (state.request.kind == aiVaultBuild || state.request.kind == aiVaultLoad) {
+			state.cancel()
+		}
+		if state.index == nil && state.request == nil {
+			state.loaded = false
+		}
+	}
 	app.vaultFileCount = count
 	app.clearUnlinkedMentions()
 	app.clearVaultSidebarSearch()
@@ -283,7 +325,7 @@ func (app *workspaceWindow) workingText() string {
 			if app.inspection || workspace.IsDelimitedPreviewPath(app.document.Path) {
 				app.largePreview.measure(app.text)
 			}
-			if app.inspection && app.document.Path == "" {
+			if (app.inspection || app.startTitleFromSource) && app.document.Path == "" {
 				title := workspace.FileInspectionTitle(app.text)
 				if app.templateTitle != title {
 					app.templateTitle = title
