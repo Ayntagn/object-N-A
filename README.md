@@ -1,4 +1,4 @@
-# object-N/A v0.1.0
+# object-N/A v0.2.0
 
 object-N/A 是用 Go 和 MyGo 实现的本地 Markdown 工作区。打开一个 Vault 后，可以从文件树编辑笔记、并排查看 Markdown 预览、浏览链接图谱，或在多文件视图中同时查看几份稿件。
 
@@ -6,10 +6,10 @@ object-N/A 是用 Go 和 MyGo 实现的本地 Markdown 工作区。打开一个 
 
 ## 取得源码
 
-使用对私有仓库有读取权限的凭据克隆版本标签。也可以从 GitHub 发布页下载 `Source code (zip)`，解压后进入包含 `go.mod` 的目录。 [v0.1.0](https://github.com/Ayntagn/object-N-A/releases/tag/v0.1.0)
+仓库已公开，可直接克隆版本标签。也可以从 GitHub 发布页下载 `Source code (zip)`，解压后进入包含 `go.mod` 的目录。 [v0.2.0](https://github.com/Ayntagn/object-N-A/releases/tag/v0.2.0)
 
 ```sh
-git clone --branch v0.1.0 --depth 1 https://github.com/Ayntagn/object-N-A.git
+git clone --branch v0.2.0 --depth 1 https://github.com/Ayntagn/object-N-A.git
 cd object-N-A
 ```
 
@@ -101,4 +101,4 @@ sh packaging/install-linux.sh dist/object-n-a
 
 ## 验证范围
 
-v0.1.0 在 Apple silicon 本机构建，校验了 Bundle 签名，并从 Bundle 执行 `-version`。Windows 和 Linux 的 amd64 交叉编译通过，Linux 的安装文件及 `.desktop` 命令在隔离目录验证。Windows 开始菜单和 Linux 桌面启动仍待对应平台实机验证。
+v0.2.0（构建 159）在 Apple silicon 本机构建，校验了 Bundle 签名，并从 Bundle 执行 `-version`。Windows 和 Linux 的 amd64 交叉编译通过，Linux 的安装文件及 `.desktop` 命令在隔离目录验证。Windows 开始菜单和 Linux 桌面启动仍待对应平台实机验证。程序内版本字符串仍为 v0.1.0。
