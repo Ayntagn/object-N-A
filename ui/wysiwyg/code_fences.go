@@ -189,22 +189,22 @@ func markdownWithoutFences(text richtext.Text, paragraphs []richtext.Paragraph) 
 			!strings.HasPrefix(paragraph.Runs[0].Text, "[!") {
 			continue
 		}
-		markdown := richtext.TextOf(paragraph).Markdown()
+		markdown := markdownWithHighlights(richtext.TextOf(paragraph), paragraphs[i:i+1])
 		after, ok := strings.CutPrefix(markdown, `> \[!`)
 		if !ok {
 			continue
 		}
 		if i > start {
-			parts = append(parts, richtext.TextOf(paragraphs[start:i]...).Markdown())
+			parts = append(parts, markdownWithHighlights(richtext.TextOf(paragraphs[start:i]...), paragraphs[start:i]))
 		}
 		parts = append(parts, "> [!"+after)
 		start = i + 1
 	}
 	if len(parts) == 0 {
-		return text.Markdown()
+		return markdownWithHighlights(text, paragraphs)
 	}
 	if start < len(paragraphs) {
-		parts = append(parts, richtext.TextOf(paragraphs[start:]...).Markdown())
+		parts = append(parts, markdownWithHighlights(richtext.TextOf(paragraphs[start:]...), paragraphs[start:]))
 	}
 	return strings.Join(parts, "\n\n")
 }

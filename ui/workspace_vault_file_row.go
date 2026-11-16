@@ -63,13 +63,13 @@ func drawVaultFileRowContents(c *mygoui.Context, title, folder, symbol string, c
 	})
 }
 
-func (app *workspaceWindow) fileRow(c *mygoui.Context, tree mygoui.TreeParts, entry workspace.Entry, colors vaultSectionColors) {
+func (app *workspaceWindow) fileRow(c *mygoui.Context, tree mygoui.TreeParts, entry workspace.Entry, colors vaultSectionColors, drawContents bool) {
 	c.Key(entry.Path)
 	item := tree.Item(nil)
 	label := app.noteLabel(entry.Name)
 	selected := app.storage == nil && entry.Path == app.document.Path
 	inset := vaultTreeRowInset(item.Depth())
-	row := item.Row.Role(mygoui.RoleButton).FillWidth().Height(24).
+	row := item.Row.Role(mygoui.RoleButton).FillWidth().Height(vaultFileRowHeight).
 		Padding(4, 12).PaddingStart(inset).Gap(8).AlignItems(mygoui.Center).
 		Label(label).Tooltip(entry.Path).AccessSelected(selected)
 	row.OnClick(func() { app.openVaultFileByPreference(entry.Path, row.ClickModifiers(), false) }).
@@ -79,6 +79,9 @@ func (app *workspaceWindow) fileRow(c *mygoui.Context, tree mygoui.TreeParts, en
 			app.vaultSiblingOrderMenu(m, entry.Path)
 		})
 	app.vaultTreeDragRow(c, row, mygoui.Element{}, entry.Path, inset)
+	if !drawContents {
+		return
+	}
 	if selected {
 		opacity := float32(.22)
 		switch app.appAppearance() {

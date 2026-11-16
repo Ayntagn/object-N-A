@@ -245,7 +245,16 @@ func isTableExit(style richtext.ParagraphStyle) bool { return style.ID == tableE
 
 // The table attachment masks its cells from the surrounding document's
 // round-trip check. Keep unsupported cell markup in the Markdown editor.
-func supportsVisualTable(doc *parser.Document, index int) bool {
+func supportsVisualTable(doc *parser.Document, index, end int) bool {
+	source := doc.Source()[doc.Block(index).Start:end]
+	if strings.Contains(source, "==") {
+		table := parser.New(doc.Extensions())
+		table.Set(source)
+		projected, _ := projectHighlights(table)
+		if projected != table && projected.Len() > 1 && projected.Block(1).Kind == parser.Table {
+			doc, index = projected, 1
+		}
+	}
 	for row := range doc.Children(index) {
 		for cell := range doc.Children(row) {
 			for _, inline := range doc.Inlines(cell) {
@@ -259,6 +268,49 @@ func supportsVisualTable(doc *parser.Document, index int) bool {
 		}
 	}
 	return true
+}
+
+// ParseTableCell keeps the table's pipe escapes and inline formatting when
+// projecting its source to an editable rich-text field.
+func ParseTableCell(source string) richtext.Text {
+	if source == tableEmptyParagraphMarkdown {
+		return richtext.Text{}
+	}
+	const header = "Cell\n"
+	markdown := "| Cell |\n| --- |\n| " + source + " |"
+	var text richtext.Text
+	if strings.Contains(source, "==") {
+		doc := parser.New(Extensions)
+		doc.Set(markdown)
+		projected, highlights := projectHighlights(doc)
+		if projected != doc {
+			marked, ok := applyHighlightDelimiters(richtext.ParseMarkdown(projected.Source()), highlights)
+			if ok {
+				text = marked
+			}
+		}
+	}
+	if text.Len() == 0 {
+		text = richtext.ParseMarkdown(markdown)
+	}
+	if !strings.HasPrefix(text.String(), header) {
+		return richtext.NewText(source)
+	}
+	return text.Slice(len(header), text.Len())
+}
+
+// TableCellMarkdown serializes a cell on one Markdown line. The existing
+// table transaction escapes pipes and validates the reconstructed table.
+func TableCellMarkdown(text richtext.Text) string {
+	parts := make([]string, 0, text.ParagraphCount())
+	for _, paragraph := range text.Paragraphs() {
+		paragraph.Style = richtext.ParagraphStyle{}
+		parts = append(parts, markdownWithHighlights(richtext.TextOf(paragraph), []richtext.Paragraph{paragraph}))
+	}
+	if value := strings.Join(parts, "<br />"); value != "" {
+		return value
+	}
+	return tableEmptyParagraphMarkdown
 }
 
 func supportsTableHTML(tag string) bool {

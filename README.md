@@ -12,11 +12,11 @@ object-N/A 是一款面向本地文件的 Markdown 桌面应用。它将笔记�
 
 - **文件管理**：通过文件树浏览和管理 Vault 中的文档。
 - **Markdown 编辑**：在集成编辑器中编写和修改 Markdown 文档。
-- **实时预览**：编辑文档的同时查看渲染后的内容。
+- **实时预览**支持边写边看，Markdown 预览和 PDF 默认跟随编辑器字体。
 - **知识图谱**：以可视化的方式浏览笔记之间的链接与关联。
 - **多文档视图**：同时打开和查看多个文档，方便在不同内容之间切换。
 - **Vault 管理**：打开已有的笔记目录，或直接创建新的 Vault。
-- **PDF 阅读**：在工作区中预览 PDF 文档。
+- **PDF 阅读与导出**都可在工作区完成。Markdown 生成的 PDF 按语言高亮代码块。
 - **双语界面**：支持简体中文和 English，语言设置会在重启后保留。
 
 ## 界面与工作区
@@ -44,7 +44,7 @@ object-N/A 以 Vault 作为工作区单位。你可以选择已有的笔记目�
 克隆仓库：
 
 ```bash
-git clone --branch v0.2.0 --depth 1 https://github.com/Ayntagn/object-N-A.git
+git clone --branch v0.3.0 --depth 1 https://github.com/Ayntagn/object-N-A.git
 cd object-N-A
 ```
 
@@ -59,7 +59,7 @@ go version
 go run ./cmd/assets
 ```
 
-资源脚本会按照项目锁定的版本下载构建所需的字体和渲染资源，上游资源文件合计约 185 MB。
+资源脚本会按照项目锁定的版本下载字体和渲染资源，并准备带编辑器兼容修补的 MyGo 源码。上游资源文件合计约 185 MB。
 
 ## 构建与安装
 

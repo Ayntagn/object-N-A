@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"cyberwriter/internal/core/markdownhighlight"
 	"cyberwriter/internal/core/mermaid"
 	"cyberwriter/internal/core/vaultindex"
 	"cyberwriter/internal/core/workspace"
@@ -49,6 +50,7 @@ type workspacePreview struct {
 	chartFiles       *previewChartFiles
 	zoom             int
 	theme            string
+	editorFont       *documentEditorFont
 	customCSS        string
 	lineSpacing      float64
 	scrollPastEnd    bool
@@ -172,6 +174,9 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 		p.html.draw(c, app, text, zoom)
 		return
 	}
+	if kind == documentMarkdown {
+		theme = theme.withEditorFont(app.preferences.EditorFont)
+	}
 	p.html.close()
 	if p.view == nil || p.view.IsDestroyed() || !p.ready {
 		if kind != documentMarkdown {
@@ -180,9 +185,10 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 		}
 		style := theme.markdownTheme(zoom, spacing)
 		style.CodeColors = previewCodeTheme(theme.dark())
-		mygoui.Scroll(c).Grow(1).MinHeight(0).FillWidth().Label("Markdown Preview").Padding(24).
-			Background(mygoui.Hex(theme.BackgroundColor)).Children(func() {
-			markdown.View(c, text, withMarkdownCodeBadges(&markdown.Options{
+		scroll := mygoui.Scroll(c).Grow(1).MinHeight(0).FillWidth().Label("Markdown Preview").Padding(24).
+			Background(mygoui.Hex(theme.BackgroundColor)).FontFeatures(theme.editorFont.features)
+		scroll.Children(func() {
+			markdown.View(c, nativeHighlightedMarkdown(scroll, text, parser.GFM), withMarkdownCodeBadges(&markdown.Options{
 				Extensions: parser.GFM,
 				Theme:      style,
 			}))
@@ -213,17 +219,18 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 		p.queryVault, p.queryIndex = app.vault, app.index.data
 	}
 	apiEnabled := kind == documentMarkdown && app.previewAPIEnabled()
-	if switched || p.refreshPending || p.source != text || p.theme != theme.ID || p.customCSS != customCSS ||
+	themeChanged := p.theme != theme.ID || p.editorFont != theme.editorFont
+	if switched || p.refreshPending || p.source != text || themeChanged || p.customCSS != customCSS ||
 		p.lineSpacing != spacing || p.scrollPastEnd != app.preferences.ScrollPastEnd ||
 		p.numberFigures != app.preferences.NumberFigures || app.previewAnchor != "" ||
 		app.previewRevealLine > 0 ||
 		p.apiEnabled != apiEnabled || (apiEnabled && p.apiVersion != app.textVersion) {
 		var themeFonts string
-		if p.theme != theme.ID || p.refreshPending {
-			themeFonts = previewThemeFonts(theme.ID)
+		if themeChanged || p.refreshPending {
+			themeFonts = "@layer builtin {" + theme.cssVariables() + "}" + theme.fontFaces()
 		}
 		p.refreshPending = false
-		p.source, p.theme, p.customCSS = text, theme.ID, customCSS
+		p.source, p.theme, p.editorFont, p.customCSS = text, theme.ID, theme.editorFont, customCSS
 		p.lineSpacing = spacing
 		p.scrollPastEnd = app.preferences.ScrollPastEnd
 		p.numberFigures = app.preferences.NumberFigures
@@ -343,6 +350,7 @@ func (m *previewMarkup) render(text, fallbackTitle string, trackLines bool) (bod
 // previewMarkup renders parsed Markdown for previews and standalone exports.
 type previewMarkup struct {
 	doc                *parser.Document
+	highlights         []markdownhighlight.Marker
 	out                strings.Builder
 	anchors            map[string]int
 	title              string
@@ -391,6 +399,9 @@ func (m *previewMarkup) lineAttribute(block *parser.Block) string {
 }
 
 func (m *previewMarkup) blocks(parent int) {
+	if parent == 0 {
+		m.highlights = markdownhighlight.Markers(m.doc)
+	}
 	var previous int
 	for i := range m.doc.Children(parent) {
 		block := m.doc.Block(i)
@@ -611,7 +622,7 @@ func (m *previewMarkup) inlines(in []parser.Inline, start, end int) {
 		n := in[i]
 		switch n.Kind {
 		case parser.Text:
-			m.prose(n)
+			m.highlightProse(n)
 		case parser.HTML:
 			m.out.WriteString(html.EscapeString(n.Text))
 		case parser.SoftBreak:
@@ -700,6 +711,10 @@ var previewStyles = `
   pre { overflow-x: auto; padding: 16px; border-radius: 8px; background: rgba(127,127,127,.14); }
   pre code { background: transparent; padding: 0; }
   blockquote { margin-inline: 0; border-inline-start: 3px solid rgba(127,127,127,.4); padding-inline-start: 1em; }
+  mark.cw-highlight {
+    background: rgba(255,214,92,.32); color: inherit; border-radius: 2px;
+    padding: 0 1px; -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  }
   .table-scroll { overflow-x: auto; }
   table { border-collapse: collapse; }
   th, td { padding: 8px 12px; text-align: left; border: 1px solid rgba(127,127,127,.35); }

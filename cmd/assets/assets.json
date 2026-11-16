@@ -347,5 +347,37 @@
         "sha256": "5992ab9640e2df491b2f609467b1de60e8bc39b2c28db184342a0592d98f6117"
       }
     ]
+  },
+  {
+    "name": "Maple Mono v7.9",
+    "url": "https://github.com/subframe7536/maple-font/releases/download/v7.9/MapleMono-TTF.zip",
+    "format": "zip",
+    "integrity": "sha256-3a35f8f0669bef3dded9df208cc4526a6f7573210e134816e9084a8981271d75",
+    "files": [
+      {
+        "member": "MapleMono-Regular.ttf",
+        "path": "ui/fonts/MapleMono-Regular.ttf.gz",
+        "size": 265024,
+        "sha256": "369583f0b555f33bdb6fdbcc2a6840a7a61a1d72c008a57a665baa36d7d5adf6"
+      },
+      {
+        "member": "MapleMono-Bold.ttf",
+        "path": "ui/fonts/MapleMono-Bold.ttf.gz",
+        "size": 265532,
+        "sha256": "e0623db6219886ce8906f440b9668acc7fab96b94e4036ac7a27809cd4bb72d7"
+      },
+      {
+        "member": "MapleMono-Italic.ttf",
+        "path": "ui/fonts/MapleMono-Italic.ttf.gz",
+        "size": 291308,
+        "sha256": "fde2a23a7062923761ac0e3c718718c181bdb9865325430175819eb55a495e90"
+      },
+      {
+        "member": "MapleMono-BoldItalic.ttf",
+        "path": "ui/fonts/MapleMono-BoldItalic.ttf.gz",
+        "size": 291652,
+        "sha256": "c9d6a8f203c86409aa63eb2b5716bd854819e481a8bdbe0bba1f7a476e59080f"
+      }
+    ]
   }
 ]

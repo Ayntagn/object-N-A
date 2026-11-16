@@ -432,6 +432,10 @@ func (w *workspaceWYSIWYG) format(app *workspaceWindow, format markdownFormat) b
 		doc.ToggleStrikethrough()
 	case inlineCodeFormat:
 		doc.ToggleCode()
+	case highlightFormat:
+		if !wysiwyg.ToggleHighlight(doc) {
+			return false
+		}
 	case linkFormat:
 		w.linkCell = w.focusedCell
 		w.linkURL = doc.Formatting().Link

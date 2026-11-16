@@ -1,4 +1,4 @@
-// spec: FEAT-001 / EV-UI-022, EV-UI-063
+// spec: FEAT-001 / EV-UI-022, EV-UI-063, EV-MYGO-266
 package ui
 
 import (
@@ -9,6 +9,32 @@ import (
 
 	mygoui "github.com/egoist/mygo/ui"
 )
+
+func TestMarkdownPreviewUsesChosenEditorFont(t *testing.T) {
+	theme, _ := findPreviewTheme("night")
+	for _, choice := range []struct {
+		preference, native, css, bundled string
+	}{
+		{"Space Grotesk", "Space Grotesk, monospace", `"Space Grotesk", monospace`, `font-family: "Space Grotesk"`},
+		{"", "monospace", "monospace", ""},
+	} {
+		preview := theme.withEditorFont(choice.preference)
+		style := preview.markdownTheme(100, 0)
+		if style.Font != choice.native || style.CodeFont != choice.native {
+			t.Fatalf("native Markdown font = %q for body, %q for code, want %q", style.Font, style.CodeFont, choice.native)
+		}
+		css := preview.cssVariables()
+		for _, variable := range []string{"--doc-body-font", "--doc-heading-font", "--doc-code-font"} {
+			if !strings.Contains(css, variable+": "+choice.css+";") {
+				t.Errorf("web Markdown %s did not use %q", variable, choice.css)
+			}
+		}
+		if fonts := preview.fontFaces(); (choice.bundled == "" && fonts != "") ||
+			(choice.bundled != "" && !strings.Contains(fonts, choice.bundled)) {
+			t.Errorf("unexpected WebView font registration for %q", choice.preference)
+		}
+	}
+}
 
 func TestPreviewThemeAndAppAppearanceAreIndependent(t *testing.T) {
 	t.Setenv("CYBERWRITER_CONFIG_DIR", t.TempDir())

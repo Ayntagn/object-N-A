@@ -297,7 +297,11 @@ func (app *workspaceWindow) sidebar(c *mygoui.Context) {
 		if showRecents {
 			app.recentHeader(c)
 		}
-		mygoui.Scroll(c).Grow(1).MinHeight(0).Margin(0, 3, 0, 4).Padding(4, 0, 0).Label("Vault file list").Children(func() {
+		files := mygoui.Scroll(c).Grow(1).MinHeight(0).Margin(0, 3, 0, 4).Padding(4, 0, 0).Label("Vault file list")
+		if data := app.graphData(); app.preferences.VaultTagsExpanded && data != nil && len(data.Tags) > 0 {
+			files.Basis(48).MinHeight(vaultFileRowHeight + 4).Shrink(.125)
+		}
+		files.Children(func() {
 			mygoui.Column(c).FillWidth().Shrink(0).Children(func() {
 				if showRecents && app.recentsOpen {
 					app.recentRows(c)
@@ -305,7 +309,7 @@ func (app *workspaceWindow) sidebar(c *mygoui.Context) {
 				if filtering {
 					app.searchVault(c, tagged)
 				} else {
-					app.drawVaultFileTree(c)
+					app.drawVaultFileTree(c, files)
 				}
 			})
 		})
@@ -677,7 +681,7 @@ func (app *workspaceWindow) buildMenu() {
 			{Label: "Quick Export PDF", Accelerator: "CmdOrCtrl+E", Click: command(app.quickExportPDF)},
 			{Label: "Export…", Accelerator: "CmdOrCtrl+Shift+E", Click: command(app.showExport)},
 			mygo.Separator(),
-			{Label: "Close", Accelerator: "CmdOrCtrl+W", Click: command(app.closeWorkspaceCommand)},
+			{Label: "Close", Accelerator: "CmdOrCtrl+W", Click: app.closeWorkspaceCommand},
 			{Label: "Close All", Accelerator: "CmdOrCtrl+Alt+W", Click: command(app.win.Close)},
 		}},
 		{Label: "Edit", Submenu: []*mygo.MenuItem{

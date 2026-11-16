@@ -12,7 +12,7 @@ var formattingCommands = [...]struct {
 	{"Strike Through", "strikethrough", strikethroughFormat, mygoui.KeyUnknown},
 	{"Embed Code", "chevron.left.forwardslash.chevron.right", inlineCodeFormat, mygoui.KeyBackquote},
 	{"Link", "link", linkFormat, mygoui.KeyK},
-	{"Highlight", "highlighter", "", mygoui.KeyUnknown},
+	{"Highlight", "highlighter", highlightFormat, mygoui.KeyUnknown},
 	{"Table", "tablecells", "", mygoui.KeyUnknown},
 }
 

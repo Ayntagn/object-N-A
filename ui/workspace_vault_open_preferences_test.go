@@ -80,9 +80,9 @@ func TestVaultOpenPreferencesRouteTreeSearchAndDrawing(t *testing.T) {
 		tree := mygoui.TreeBase(c)
 		tree.Root.Children(func() {
 			colors := app.vaultSectionColors(c)
-			app.fileRow(c, tree, replaceEntry, colors)
+			app.fileRow(c, tree, replaceEntry, colors, true)
 			app.searchResultRow(c, tree, vaultindex.SidebarSearchHit{Entry: sharedEntry}, colors)
-			app.fileRow(c, tree, drawingEntry, colors)
+			app.fileRow(c, tree, drawingEntry, colors, true)
 		})
 	}, 390, 120)
 	click := func(name string, mods mygoui.Modifiers) {

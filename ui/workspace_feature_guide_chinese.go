@@ -44,8 +44,8 @@ var featureGuideChineseCopy = map[string]featureGuideCopy{
 		hints: []string{"Insert → Footnote", "引用与脚注定义使用同一个标签"},
 	},
 	"highlight": {
-		title: "强调与行内代码", summary: "突出一段文字，或用等宽字体显示简短的命令。",
-		hints: []string{"⌘ B", "Insert → Inline Code", "先选中要格式化的文字"},
+		title: "高亮与行内代码", summary: "给一段文字加底色，或用等宽字体显示简短的命令。",
+		hints: []string{"Insert → Highlight", "先选中要高亮的文字"},
 	},
 	"figures": {
 		title: "插图与图注", summary: "给插图加上说明，并使用便于迁移的相对图片路径。",

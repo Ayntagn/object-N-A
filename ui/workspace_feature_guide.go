@@ -120,10 +120,21 @@ func (app *workspaceWindow) closeFeatureGuideIfFocused() bool {
 	return false
 }
 
-func (app *workspaceWindow) closeWorkspaceCommand() {
-	if !app.closeWelcomeIfFocused() && !app.closeFeatureGuideIfFocused() {
-		app.closeTab(app.workspaceTab)
-	}
+func (app *workspaceWindow) closeWorkspaceCommand(_ *mygo.MenuItem, focused *mygo.Window) {
+	app.win.Update(func() {
+		if focused == nil || focused.IsDestroyed() {
+			return
+		}
+		for _, workspace := range app.documentWindows() {
+			if focused == workspace.settings {
+				focused.Close()
+				return
+			}
+		}
+		if !app.modalOpen && !app.closeWelcomeIfFocused() && !app.closeFeatureGuideIfFocused() && focused == app.win {
+			app.closeTab(app.workspaceTab)
+		}
+	})
 }
 
 func (a *workspaceApplication) refreshHelpLanguage() {

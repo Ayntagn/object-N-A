@@ -91,6 +91,7 @@ func (app *workspaceWindow) addPaletteEditorActions(actions map[commandPaletteKe
 		{"FORMATTING", "Italic"}:        italicFormat,
 		{"FORMATTING", "Strikethrough"}: strikethroughFormat,
 		{"FORMATTING", "Inline Code"}:   inlineCodeFormat,
+		{"FORMATTING", "Highlight"}:     highlightFormat,
 		{"LINKS & MEDIA", "Link"}:       linkFormat,
 	}
 	for key, format := range formats {

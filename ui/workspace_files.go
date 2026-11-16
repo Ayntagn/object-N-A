@@ -163,7 +163,12 @@ func (app *workspaceWindow) openPickedDocument(absolute string, replaceInitial b
 		app.activateTab(tab)
 		return
 	}
-	doc, err := storage.ReadDocument(filepath.Base(absolute))
+	sourceText := workspace.IsSourceTextPath(absolute)
+	read := storage.ReadDocument
+	if sourceText {
+		read = storage.ReadTextDocument
+	}
+	doc, err := read(filepath.Base(absolute))
 	if err != nil {
 		app.closeUnusedVault(storage)
 		app.problem = fmt.Sprintf("Could not open %q. %v", absolute, err)
@@ -172,6 +177,9 @@ func (app *workspaceWindow) openPickedDocument(absolute string, replaceInitial b
 	tab := app.availableTab(replaceInitial)
 	tab.storage, tab.folderRoot = storage, root
 	app.setTabDocument(tab, doc)
+	if sourceText {
+		tab.mode = splitMode
+	}
 	app.activateTab(tab)
 }
 

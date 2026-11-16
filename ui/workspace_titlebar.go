@@ -27,12 +27,14 @@ func (app *workspaceWindow) toolbar(c *mygoui.Context) {
 		if runtime.GOOS != "darwin" {
 			height = max(height, bar.Height)
 		}
-		mygoui.Row(c).Height(height).Shrink(0).FillWidth().DragWindow().Background(app.titleSurface(c)).
-			AlignItems(mygoui.Center).Padding(0, 10, 0, max(10, bar.Left)).Children(func() {
+		title := mygoui.Row(c).Height(height).Shrink(0).FillWidth().DragWindow().Background(app.titleSurface(c)).
+			AlignItems(mygoui.Center).Padding(0, 10, 0, max(10, bar.Left)).Label("Document title")
+		title.Children(func() {
 			mygoui.Text(c, app.title()).Grow(1).MinWidth(0).SingleLine().Ellipsis("…").TextAlign(mygoui.Center)
 			chromeButton(c, "arrow.up.left.and.arrow.down.right", "Exit Focus Mode",
 				paneAction(!app.modalOpen, app.toggleFocus)).Size(28, 24)
 		})
+		app.tabDropTarget(c, title, 6)
 		return
 	}
 
@@ -67,7 +69,7 @@ func (app *workspaceWindow) toolbar(c *mygoui.Context) {
 	rightControls := 185 + spacing + keyboardWidth + settingsWidth + tailWidth
 
 	mygoui.Column(c).Height(titleBarHeight).Shrink(0).FillWidth().Children(func() {
-		mygoui.Toolbar(c, func() {
+		toolbar := mygoui.Toolbar(c, func() {
 			app.titleButton(c, "folder", "Vault", 43, func() {
 				if app.vault == nil || app.showingAI() {
 					app.openFilesSidebar()
@@ -156,6 +158,8 @@ func (app *workspaceWindow) toolbar(c *mygoui.Context) {
 			Label("Main toolbar")
 		if width > left+leftControls+right+rightControls {
 			app.toolbarTitle(c, left+leftControls, right+rightControls)
+		} else {
+			app.tabDropTarget(c, toolbar, 6)
 		}
 	})
 }
@@ -193,7 +197,7 @@ func (app *workspaceWindow) toggleScrollSync() {
 func (app *workspaceWindow) toolbarTitle(c *mygoui.Context, left, right float32) {
 	title := app.title()
 	slot := mygoui.Row(c.Key("workspace-title")).Absolute().Left(left).Right(right).Top(0).
-		Height(titleBarHeight).AlignItems(mygoui.Center).DragWindow()
+		Height(titleBarHeight).AlignItems(mygoui.Center).DragWindow().Label("Document title")
 	slot.Children(func() {
 		if app.canShowDocumentTitleActions() {
 			if !app.blackout {
@@ -208,6 +212,7 @@ func (app *workspaceWindow) toolbarTitle(c *mygoui.Context, left, right float32)
 			label.TextAlign(mygoui.Start).PaddingStart(8).FontSize(14).FontWeight(600)
 		}
 	})
+	app.tabDropTarget(c, slot, 6)
 }
 
 func titleGroup(c *mygoui.Context, width, gap, leading float32, children func()) {

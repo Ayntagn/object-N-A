@@ -16,3 +16,5 @@ require (
 )
 
 require github.com/dlclark/regexp2/v2 v2.2.1 // indirect
+
+replace github.com/egoist/mygo => ./third_party/mygo

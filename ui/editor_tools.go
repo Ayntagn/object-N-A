@@ -57,10 +57,11 @@ func (cache *outlineCache) readVisual(document *richtext.Document) {
 
 func (app *workspaceWindow) newSourceEditor(tab *workspaceTab) *editor.State {
 	tab.draft.SetLanguage(app.sourceLanguage())
-	return &editor.State{
+	code := &editor.State{
 		Buffer:          tab.draft,
 		Label:           "Source editor",
 		SoftWrap:        true,
+		NoWrapIndent:    true,
 		LineNumbers:     editor.LineNumbersOff,
 		Whitespace:      editor.WhitespaceNone,
 		NoIndentGuides:  true,
@@ -70,6 +71,8 @@ func (app *workspaceWindow) newSourceEditor(tab *workspaceTab) *editor.State {
 		OnInput:         app.sourceInput,
 		ContextMenu:     app.sourceContextMenu,
 	}
+	code.WrapTextInput = (&sourceParagraphTextInput{app: app, code: code}).wrap
+	return code
 }
 
 func (app *workspaceWindow) sourceContextMenu(m *mygoui.Menu) {
@@ -112,8 +115,12 @@ func (app *workspaceWindow) drawSourceEditor(c *mygoui.Context, tab *workspaceTa
 	tab.draft.SetLanguage(language)
 	code.Label = label
 	code.Theme = app.sourceEditorTheme(tab, c.Theme().Dark)
+	family := sourceEditorFontFamily(app.preferences.EditorFont)
+	if code.Font.Size == 0 || code.Font.Family != family {
+		code.Font.Family = family
+		code.Font.Features = sourceFontFeatures(family)
+	}
 	code.Font.Size = float32(app.sourceFontSize())
-	code.Font.Family = sourceEditorFontFamily(app.preferences.EditorFont)
 	code.LineHeight = app.sourceEditorLineHeight(code.Font)
 	code.LineNumbers = editor.LineNumbersOff
 	if app.preferences.LineNumbers && app.blackout && !c.Preferences().HighContrast && sourceThemeForID(app.preferences.EditorTheme).id == systemSourceThemeID {
@@ -165,6 +172,31 @@ func (app *workspaceWindow) drawSourceEditor(c *mygoui.Context, tab *workspaceTa
 			app.focusSource = false
 		}
 	})
+}
+
+// Fixed-pitch source text keeps each ASCII cell's advance even beside
+// fallback CJK glyphs. Proportional faces use the font's normal kerning.
+func sourceFontFeatures(family string) string {
+	const fixedPitch = "kern=0"
+	if family == "" { // The editor resolves an empty family to system monospace.
+		return fixedPitch
+	}
+	if strings.EqualFold(family, sourceMapleMonoNFCN+", monospace") ||
+		strings.EqualFold(family, sourceFontDefaultFamily+", monospace") {
+		return fixedPitch + ", " + mapleMonoOpenTypeFeatures
+	}
+	const sample = "iMW0 "
+	glyphs := mygoui.Shape(sample, mygoui.Font{Family: family, Size: sourceFontDefault, Features: fixedPitch})
+	if len(glyphs) != len(sample) || glyphs[0].Advance <= 0 {
+		return ""
+	}
+	for _, glyph := range glyphs[1:] {
+		difference := glyph.Advance - glyphs[0].Advance
+		if difference < -0.01 || difference > 0.01 {
+			return ""
+		}
+	}
+	return fixedPitch
 }
 
 func (app *workspaceWindow) registerEditorShortcuts(c *mygoui.Context) {

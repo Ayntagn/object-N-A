@@ -69,8 +69,10 @@ func (preview *featureGuidePreview) draw(c *mygoui.Context, card *featureGuideCa
 	mygoui.Box(c.Key("guide-preview")).FillWidth().Height(card.preview).Shrink(0).
 		Radius(9).Background(mygoui.Hex(theme.BackgroundColor)).Clip().Children(func() {
 		if preview.view == nil || !preview.ready {
-			mygoui.Scroll(c).Fill().Padding(16).Children(func() {
-				markdown.View(c, card.source, &markdown.Options{Extensions: webPreviewExtensions, Theme: theme.markdownTheme(100, 0)})
+			scroll := mygoui.Scroll(c).Fill().Padding(16)
+			scroll.Children(func() {
+				text := nativeHighlightedMarkdown(scroll, card.source, webPreviewExtensions)
+				markdown.View(c, text, &markdown.Options{Extensions: webPreviewExtensions, Theme: theme.markdownTheme(100, 0)})
 			})
 			return
 		}

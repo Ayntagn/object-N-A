@@ -154,20 +154,7 @@ func Run(initialVault string) error {
 	mygo.App.WhenReady(func() {
 		mygo.Theme.SetSource(preferences.Appearance.themeSource())
 		application.installSessionLifecycle()
-		app := application.newWindow(&workspaceTab{mode: preferences.DefaultView}, nil)
-		root := initialVault
-		if root == "" {
-			root = preferences.Session.Vault
-		}
-		opened := root != "" && app.openVault(root)
-		if opened {
-			application.restoreSession(app, preferences.Session)
-		}
-		if app.draft == nil && app.drawing == nil {
-			app.setTabDocument(app.workspaceTab, workspace.Document{})
-			app.initialEmptyTab = true
-			app.activateTab(app.workspaceTab)
-		}
+		app, opened := application.prepareWorkspace(initialVault, preferences.Session)
 		if preferencesErr != nil && app.problem == "" {
 			app.problem = fmt.Sprintf("Could not load workspace settings. %v", preferencesErr)
 		}

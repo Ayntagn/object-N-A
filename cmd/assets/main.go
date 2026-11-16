@@ -71,6 +71,9 @@ func restoreAssets() error {
 	if _, err := root.Stat("go.mod"); err != nil {
 		return errors.New("run go run ./cmd/assets from the repository root")
 	}
+	if err := restoreMyGo(root); err != nil {
+		return fmt.Errorf("MyGo: %w", err)
+	}
 	client := &http.Client{
 		Timeout: 12 * time.Minute,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {

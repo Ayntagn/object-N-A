@@ -54,29 +54,7 @@ const (
 )
 
 func visualCellText(source string) richtext.Text {
-	if source == "<br />" {
-		return richtext.Text{}
-	}
-	// Reuse the table inline parser, including pipe escapes in code spans
-	// and punctuation that would start a block in ordinary Markdown.
-	const header = "Cell\n"
-	text := richtext.ParseMarkdown("| Cell |\n| --- |\n| " + source + " |")
-	if !strings.HasPrefix(text.String(), header) {
-		return richtext.NewText(source)
-	}
-	return text.Slice(len(header), text.Len())
-}
-
-func visualCellMarkdown(text richtext.Text) string {
-	parts := make([]string, 0, text.ParagraphCount())
-	for _, paragraph := range text.Paragraphs() {
-		paragraph.Style = richtext.ParagraphStyle{}
-		parts = append(parts, richtext.TextOf(paragraph).Markdown())
-	}
-	if value := strings.Join(parts, "<br />"); value != "" {
-		return value
-	}
-	return "<br />"
+	return wysiwyg.ParseTableCell(source)
 }
 
 func (w *workspaceWYSIWYG) syncVisualTableCell(app *workspaceWindow, cell *visualTableCell) {
@@ -94,7 +72,7 @@ func (w *workspaceWYSIWYG) syncVisualTableCell(app *workspaceWindow, cell *visua
 		trailing := len(raw) - len(strings.TrimRight(raw, " "))
 		text = text.Slice(leading, max(leading, text.Len()-trailing))
 	}
-	value := visualCellMarkdown(text)
+	value := wysiwyg.TableCellMarkdown(text)
 	updated, err := w.session.ChangeTableCell(cell.offset, table, cell.row, cell.col, value)
 	if err != nil {
 		app.problem = err.Error()

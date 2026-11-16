@@ -156,10 +156,19 @@ func (s *Session) InsertMarkdownAt(start, end int, source string) bool {
 }
 
 func projectMarkdown(parsed *parser.Document, source string, formulas map[string]*Formula, images map[string]*Image) (richtext.Text, string, bool) {
-	if !supported(parsed, formulas, images) {
+	projected, highlights := projectHighlights(parsed)
+	if !supported(projected, formulas, images) {
 		return richtext.Text{}, "", false
 	}
-	visual, ok := tagCodeFences(parsed, tagEmptyHeadings(richtext.ParseMarkdown(source)))
+	visual := richtext.ParseMarkdown(projected.Source())
+	if projected != parsed {
+		var ok bool
+		visual, ok = applyHighlightDelimiters(visual, highlights)
+		if !ok {
+			return richtext.Text{}, "", false
+		}
+	}
+	visual, ok := tagCodeFences(parsed, tagEmptyHeadings(visual))
 	if !ok {
 		return richtext.Text{}, "", false
 	}
@@ -167,7 +176,13 @@ func projectMarkdown(parsed *parser.Document, source string, formulas map[string
 	if source != markdown {
 		projection := parser.New(Extensions)
 		projection.Set(markdown)
-		if softBreaksAsSpaces(parsed.HTML()) != softBreaksAsSpaces(projection.HTML()) {
+		before, after := projected.HTML(), projection.HTML()
+		if projected != parsed {
+			strip := strings.NewReplacer(highlights.open, "", highlights.close, "")
+			before = strip.Replace(before)
+			after = strip.Replace(projectHighlightDelimiters(projection, highlights).HTML())
+		}
+		if softBreaksAsSpaces(before) != softBreaksAsSpaces(after) {
 			return richtext.Text{}, "", false
 		}
 	}

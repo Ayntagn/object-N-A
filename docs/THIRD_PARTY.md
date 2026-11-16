@@ -16,6 +16,7 @@
 | JetBrains Mono | 2.305 | 源文推荐字体及 PDF 导出可选字体 | SIL OFL 1.1 | [JetBrains 字库提交](https://github.com/JetBrains/JetBrainsMono/tree/02bb50b082dad9ef8a0f33ac393839202b760223/fonts/ttf) · [许可](../ui/fonts/JetBrainsMono.OFL.txt) | 否 | 系统等宽 |
 | Fira Code | 6.2，TTF 6.002 | 源文推荐字体及 PDF 导出可选字体 | SIL OFL 1.1 | [Fira Code 6.2](https://github.com/tonsky/FiraCode/releases/tag/6.2) · [许可](../ui/fonts/FiraCode.OFL.txt) | 否 | 系统等宽 |
 | Cascadia Code | 2404.23 | 源文推荐字体及 PDF 导出可选字体 | SIL OFL 1.1 | [Cascadia Code 2404.23](https://github.com/microsoft/cascadia-code/releases/tag/v2404.23) · [许可](../ui/fonts/CascadiaCode.OFL.txt) | 否 | 系统等宽 |
+| Maple Mono | v7.9 | Markdown 编辑、预览和 PDF 使用的默认字体。优先使用系统安装的 NF CN，内置标准版有四种字面。 | SIL OFL 1.1 | [Maple Mono v7.9](https://github.com/subframe7536/maple-font/releases/tag/v7.9) · [许可](../ui/fonts/MapleMono.OFL.txt) | 否 | 系统等宽 |
 | Space Grotesk | 2.000 | 源文推荐比例字体、快速切换的搜索框和文件名、PDF 导出可选字体、Blackout WYSIWYG 表格和块菜单 | SIL OFL 1.1 | [Google Fonts 字库](https://github.com/google/fonts/tree/2861cb7b12f90c0a294a12ed666e381e2211872f/ofl/spacegrotesk) · [许可](../ui/fonts/SpaceGrotesk.OFL.txt) | 否 | 系统字体 |
 | Nunito Sans | 3.101 | 源文推荐比例字体，含正体及斜体，Apropos WYSIWYG 块菜单 | SIL OFL 1.1 | [Google Fonts 下载](https://fonts.google.com/specimen/Nunito+Sans) · [许可](../ui/fonts/NunitoSans.OFL.txt) | 否 | 系统字体 |
 | Noto Sans | 2.015 | 源文推荐比例字体，含正体及斜体 | SIL OFL 1.1 | [Google Fonts 字库](https://github.com/google/fonts/tree/2984c575fdce412ee02b2baaba67672b9a9434d8/ofl/notosans) · [许可](../ui/fonts/NotoSans.OFL.txt) | 否 | 系统字体 |
@@ -26,4 +27,6 @@
 | Vega、Vega-Lite、Vega-Embed 浏览器发行物 | 5.33.1、5.23.0、6.29.0 | Markdown 预览、WYSIWYG、PDF 和独立 HTML 的 SVG 图表及表达式解释器 | BSD-3-Clause，保留发行物版权注释 | [Vega](https://github.com/vega/vega/releases/tag/v5.33.1) · [Vega-Lite](https://github.com/vega/vega-lite/releases/tag/v5.23.0) · [Vega-Embed](https://github.com/vega/vega-embed/tree/v6.29.0) | 否 | 现有 fenced code 预览 |
 | d3-dsv | 3.0.1 | Vega 渲染的 CSV、TSV 和 DSV 逐行解析 | ISC | [d3-dsv 3.0.1](https://github.com/d3/d3-dsv/tree/v3.0.1) · [许可](../ui/webassets/vega/d3-dsv-LICENSE) | 否 | Go CSV 解析与自定义浏览器读入 |
 
-运行依赖和校验由 [go.mod](../go.mod) 与 [go.sum](../go.sum) 固定。供嵌入的浏览器组件和字库由 `go run ./cmd/assets` 获取和核验。各资源目录保留对应许可证。Maple Mono 由系统提供。 [Maple Mono](https://github.com/subframe7536/maple-font)
+运行依赖和校验由 [go.mod](../go.mod) 与 [go.sum](../go.sum) 固定。供嵌入的浏览器组件和字库由 `go run ./cmd/assets` 获取和核验。各资源目录保留对应许可证。
+
+`go run ./cmd/assets` 同时通过 Go 模块工具下载 MyGo v0.8.3 源码，并应用八个兼容文件。改动用于编辑器的软折行、输入法和代码围栏排版，按上游 MIT 许可分发。 [兼容源码与许可](../cmd/assets/mygo)

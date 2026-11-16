@@ -123,6 +123,8 @@ type exportDocument struct {
 	source, name  string
 	theme         string
 	customCSS     string
+	editorFont    string
+	hasEditorFont bool // An empty editorFont explicitly selects System Mono.
 	layout        exportdoc.Layout
 	pagination    exportdoc.PDFPagination
 	appearance    pdfAppearance
@@ -284,7 +286,7 @@ func (app *workspaceWindow) exportDocument(layout exportdoc.Layout) exportDocume
 	}
 	return exportDocument{source: app.workingText(), name: name, layout: layout, origin: app.previewOrigin(),
 		kind: kind, theme: app.resolvePreviewTheme(app.previewThemeSelection()).ID, customCSS: customCSS,
-		numberFigures: app.preferences.NumberFigures}
+		numberFigures: app.preferences.NumberFigures, editorFont: app.preferences.EditorFont, hasEditorFont: true}
 }
 
 func (app *workspaceWindow) exportDirectory() string {
@@ -715,23 +717,13 @@ func saveExportPayload(win *mygo.Window, name, directory string, format exportFo
 	return filename, nil
 }
 
-func exportHTMLPage(body, title string, document exportDocument, policy, extraCSS string, format exportFormat) string {
+func exportPDFPage(body, title string, document exportDocument, theme documentPreviewTheme, policy, extraCSS string) string {
 	layout := document.layout
-	tag := "main"
-	if format == exportPDF {
-		tag = "article"
-	}
 	var attrs string
-	if theme, ok := findPreviewTheme(document.theme); ok {
+	if theme.ID != "" {
 		attrs = ` data-preview-theme="` + theme.ID + `"`
-		if format == exportPDF {
-			theme = document.appearance.applyTo(theme)
-		}
-		extraCSS += theme.cssVariables() + documentThemeElements + previewThemeFonts(theme.ID)
-		fontSize := float64(theme.BaseFontSize) * layout.FontScale / 100
-		if format == exportPDF {
-			fontSize = math.Round(fontSize)
-		}
+		extraCSS += theme.cssVariables() + documentThemeElements + document.pdfFontFaces(theme)
+		fontSize := math.Round(float64(theme.BaseFontSize) * layout.FontScale / 100)
 		extraCSS += fmt.Sprintf(`
 html[data-preview-theme] body {
   font-size: %.2fpt;
@@ -742,18 +734,8 @@ html[data-preview-theme] body {
 		if spacing := previewLineSpacing(document.source, layout.LineSpacing); spacing > 0 {
 			extraCSS += fmt.Sprintf(`html[data-preview-theme] { --preview-line-height: %g; }`, spacing)
 		}
-		if pdfFontLabel(layout.FontFamily) != pdfThemeDefault {
-			family := layout.FontFamily.CSSStack()
-			extraCSS += fmt.Sprintf(`html[data-preview-theme] { --doc-body-font: %s; --doc-heading-font: %s; }`, family, family)
-			if font := pdfOverrideFonts[layout.FontFamily]; font != nil &&
-				(layout.FontFamily != "Space Grotesk" || !strings.Contains(theme.BodyFontFamily, "Space Grotesk")) {
-				extraCSS += font()
-			}
-		}
 	}
-	if format == exportPDF {
-		extraCSS += pdfDocumentCSS
-	}
+	extraCSS += pdfDocumentCSS
 	policy, stylesheet := standaloneCustomStylesheet(policy, document.customCSS)
 	return fmt.Sprintf(`<!doctype html>
 <html%s>
@@ -766,7 +748,6 @@ html[data-preview-theme] body {
 <style>@layer builtin {
 :root { color-scheme: light; }
 body { margin: 0; color: #202124; background: #fff; font: %.2fpx/%.2f %s; overflow-wrap: anywhere; }
-main { max-width: 800px; margin: 0 auto; padding: 24px; }
 h1, h2, h3, h4, h5, h6 { line-height: 1.3; break-after: avoid; }
 pre, code { font-family: ui-monospace, monospace; background: #f4f4f5; }
 pre { padding: .75em; white-space: pre-wrap; tab-size: 4; }
@@ -780,16 +761,15 @@ th { background: #f4f4f5; }
 .image-description { font-style: italic; }
 @media screen { .page-break { margin: 1.5em 0; border-top: 1px dashed #b7b7bd; } }
 @media print {
-  main { max-width: none; margin: 0; padding: 0; }
   tr { break-inside: avoid; }
   .page-break { break-after: page; page-break-after: always; }
 }
 %s
 }</style>%s
 </head>
-<body><%s class="markdown-body">%s</%s></body>
+<body><article class="markdown-body">%s</article></body>
 </html>`, attrs, html.EscapeString(policy), html.EscapeString(title), layout.FontScale*0.15, layout.LineHeight(),
-		layout.FontFamily.CSSStack(), extraCSS, stylesheet, tag, body, tag)
+		layout.FontFamily.CSSStack(), extraCSS, stylesheet, body)
 }
 
 func printExportPDF(parent *mygo.Window, doc exportDocument) ([]byte, error) {

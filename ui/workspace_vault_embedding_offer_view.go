@@ -30,8 +30,10 @@ func (app *workspaceWindow) drawVaultEmbeddingOffer(c *mygoui.Context) {
 		iconInk, actionFill, actionInk = mygoui.Hex("#FFAAF7"), mygoui.Hex("#A9C7FF"), mygoui.Hex("#003063")
 	}
 
-	card := mygoui.Column(c.Key("Vault embedding offer")).AlignSelf(mygoui.Stretch).MinWidth(0).
-		Shrink(0).Margin(6, 16, 10).Padding(8).Gap(6).Background(fill).Radius(8).
+	// Keep the 15 pt title and both insets visible when sections compete for height.
+	card := mygoui.Scroll(c.Key("Vault embedding offer")).Label("Vault embedding offer").
+		AlignSelf(mygoui.Stretch).MinWidth(0).MinHeight(31).
+		Margin(6, 16, 10).Padding(8).Gap(6).Background(fill).Radius(8).
 		DrawOver(func(p *mygoui.Painter, frame mygoui.Rect) { p.Stroke(frame, outline, 8, 1) })
 	card.Children(func() {
 		mygoui.Row(c).FillWidth().MinWidth(0).Gap(6).AlignItems(mygoui.Center).Children(func() {

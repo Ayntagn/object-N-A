@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"slices"
 	"sync"
 
 	"cyberwriter/internal/core/vaultindex"
@@ -12,7 +11,9 @@ import (
 )
 
 const graphPanelHeight = 208
+const graphHeadingHeight = 26
 const graphWindowButtonHeight = 20.5
+const graphStatsInset = 8
 
 type workspaceGraph struct {
 	win                     *mygo.Window
@@ -62,21 +63,21 @@ func (app *workspaceWindow) graphSection(c *mygoui.Context) {
 		headerFill = mygoui.RGB(15, 15, 18)
 	}
 	graph := mygoui.Column(c.Key("vault-graph")).FillWidth().Shrink(0).Padding(0, 4)
-	var tags []measuredVaultTag
-	tagWidth := float32(vaultTagContentWidth)
+	var tags *vaultTagLayout
+	data := app.graphData()
+	if g.open && app.preferences.VaultTagsExpanded && data != nil && len(data.Tags) > 0 {
+		// Keep the full graph while Tags can give up space. In a short window
+		// both sections must fit above the file count.
+		graph.Shrink(.125).MinHeight(graphHeadingHeight + 32)
+	}
 	if g.open && showStats {
 		graph.Width(vaultTagSectionWidth).Left(4).Padding(0)
-		if data := app.graphData(); data != nil {
-			top := slices.Clone(data.Tags)
-			slices.SortStableFunc(top, func(a, b vaultindex.GraphTag) int { return b.Count - a.Count })
-			tags = app.measureVaultTags(c, top[:min(len(top), 8)])
-			tagWidth = vaultTagFlowWidth(tags)
-			// The natural-width Stats card expands around the sidebar's center.
-			graph.Left(4 + (vaultTagContentWidth-tagWidth)/2)
+		if data != nil {
+			tags = measureVaultTagLayout(c, graph, data, 8)
 		}
 	}
 	graph.Children(func() {
-		mygoui.Row(c).FillWidth().Height(26).AlignItems(mygoui.Center).Padding(0, 12).Gap(4).
+		mygoui.Row(c).FillWidth().Height(graphHeadingHeight).Shrink(0).AlignItems(mygoui.Center).Padding(0, 12).Gap(4).
 			Background(headerFill).Children(func() {
 			chevron := "chevron.right"
 			if g.open {
@@ -87,7 +88,7 @@ func (app *workspaceWindow) graphSection(c *mygoui.Context) {
 				shapeWidth, _ := sidebarGraphShapeSize(app.preferences.GraphShape)
 				disclosureWidth = 122 - shapeWidth
 			}
-			toggle := mygoui.ButtonBase(c).Height(26).Width(disclosureWidth).Gap(6).Justify(mygoui.Start).
+			toggle := mygoui.ButtonBase(c).Height(graphHeadingHeight).Width(disclosureWidth).Gap(6).Justify(mygoui.Start).
 				Label("Graph").Expanded(g.open).Disabled(app.modalOpen).OnClick(app.toggleGraph)
 			if g.open && showStats {
 				toggle.Grow(1)
@@ -123,12 +124,11 @@ func (app *workspaceWindow) graphSection(c *mygoui.Context) {
 			return
 		}
 		if showStats {
-			mygoui.Column(c.Key("stats panel")).FillWidth().Height(graphPanelHeight).Shrink(0).
-				Padding(4, 4, 4).Children(func() { app.graphStats(c, app.graphData(), tags, tagWidth) })
+			mygoui.Scroll(c.Key("stats panel")).FillWidth().Height(graphPanelHeight).MinHeight(0).Label("Vault Stats panel").
+				Padding(4).Children(func() { app.graphStats(c, data, tags) })
 			return
 		}
-		mygoui.Column(c).FillWidth().Height(graphPanelHeight).Shrink(0).Padding(4, 3, 0).Children(func() {
-			data := app.graphData()
+		mygoui.Column(c).FillWidth().Height(graphPanelHeight).MinHeight(0).Padding(4, 3, 0).Children(func() {
 			g.sidebar.view(c, data, g.layoutFor(data), app.graphOptions(false), app.openGraphNote)
 		})
 	})
@@ -415,7 +415,7 @@ func (app *workspaceWindow) graphWindowView(c *mygoui.Context) {
 	})
 }
 
-func (app *workspaceWindow) graphStats(c *mygoui.Context, data *vaultindex.Graph, tags []measuredVaultTag, tagWidth float32) {
+func (app *workspaceWindow) graphStats(c *mygoui.Context, data *vaultindex.Graph, tags *vaultTagLayout) {
 	if data == nil {
 		mygoui.Text(c, "Indexing Vault…").Role(mygoui.RoleStatus).Padding(12)
 		return
@@ -424,15 +424,19 @@ func (app *workspaceWindow) graphStats(c *mygoui.Context, data *vaultindex.Graph
 	if app.blackout {
 		panel, cell, buttonFill = mygoui.RGB(12, 12, 15), mygoui.RGB(20, 20, 23), mygoui.RGB(30, 30, 33)
 	}
-	mygoui.Column(c.Key("vault-stats")).Width(tagWidth + 16).MaxHeight(200).Shrink(0).
-		AlignItems(mygoui.Center).Padding(8).Gap(8).
+	const headingHeight = 13
+	const buttonHeight = 19
+	const cardMaxHeight = graphPanelHeight - 8
+	mygoui.Column(c.Key("vault-stats")).FillWidth().MaxHeight(cardMaxHeight).Shrink(0).
+		AlignItems(mygoui.Center).Padding(graphStatsInset).Gap(graphStatsInset).
 		Background(panel).Radius(6).Children(func() {
-		mygoui.Row(c).FillWidth().Height(13).Shrink(0).AlignItems(mygoui.Center).Gap(8).Children(func() {
+		mygoui.Row(c).FillWidth().Height(headingHeight).Shrink(0).AlignItems(mygoui.Center).Gap(8).Children(func() {
 			chromeIconColor(c, "chart.bar", 12, app.graphAccent(c))
 			mygoui.Text(c, "Vault Stats").FontSize(11).FontWeight(600).Role(mygoui.RoleHeading)
 		})
 		cardHeight, numberSize := float32(64), float32(16)
-		if len(tags) != 0 && graphStatsTagHeight(tags, tagWidth) > 84 {
+		tagsHeight := float32(len(tags.rows)*vaultTagRowHeight - vaultTagGap)
+		if tagsHeight > 84 {
 			// The stats cells compress when the tag rows use the proposed height.
 			cardHeight, numberSize = 56, 11
 		}
@@ -452,27 +456,19 @@ func (app *workspaceWindow) graphStats(c *mygoui.Context, data *vaultindex.Graph
 				})
 			}
 		})
-		if len(tags) > 0 {
-			app.vaultTagFlow(c, tags, tagWidth, false)
+		if len(tags.tags) > 0 {
+			tagViewportHeight := cardMaxHeight - headingHeight - cardHeight - buttonHeight - 5*graphStatsInset
+			mygoui.Scroll(c.Key("stats tags")).Size(vaultTagRowWidth+vaultTagInset, min(tagsHeight, tagViewportHeight)).
+				AlignSelf(mygoui.Start).Shrink(0).Label("Vault Stats tags").Children(func() {
+				mygoui.Row(c).Width(vaultTagRowWidth).Shrink(0).Wrap().Gap(vaultTagGap).Children(func() {
+					app.drawVaultTagPills(c, tags.tags, false)
+				})
+			})
 		}
-		mygoui.ButtonBase(c).Label("Open Graph in Window").FillWidth().Height(19).Radius(4).Gap(6).
+		mygoui.ButtonBase(c).Label("Open Graph in Window").FillWidth().Height(buttonHeight).Radius(4).Gap(6).
 			Background(buttonFill).Disabled(app.modalOpen).OnClick(app.showGraphWindow).Children(func() {
 			chromeIconColor(c, "arrow.up.left.and.arrow.down.right", 10, c.Theme().TextMuted)
 			mygoui.Text(c, "Open Graph in Window").FontSize(11).FontWeight(600)
 		})
 	})
-}
-
-func graphStatsTagHeight(tags []measuredVaultTag, width float32) float32 {
-	var rowWidth float32
-	rows := 1
-	for _, tag := range tags {
-		next := rowWidth + tag.width + vaultTagGap
-		if rowWidth > 0 && next > width {
-			rows++
-			next = tag.width + vaultTagGap
-		}
-		rowWidth = next
-	}
-	return float32(rows*(vaultTagPillHeight+vaultTagGap) - vaultTagGap)
 }

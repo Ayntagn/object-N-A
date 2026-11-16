@@ -144,7 +144,7 @@ func (p *workspacePDFPreview) marginMenu(m *mygoui.Menu) {
 }
 
 func (p *workspacePDFPreview) fontMenu(m *mygoui.Menu) {
-	for _, label := range pdfFontChoices {
+	for _, label := range pdfInheritedFontChoices {
 		font := pdfFontChoice(label)
 		if m.Item(label).Radio(p.form.layout.FontFamily == font).Chosen() {
 			p.form.layout.FontFamily = font

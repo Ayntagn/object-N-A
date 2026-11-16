@@ -15,6 +15,7 @@ const (
 	strikethroughFormat markdownFormat = "~~"
 	inlineCodeFormat    markdownFormat = "`"
 	linkFormat          markdownFormat = "link"
+	highlightFormat     markdownFormat = "=="
 )
 
 var escapeLinkLabel = strings.NewReplacer(`\`, `\\`, `[`, `\[`, `]`, `\]`)

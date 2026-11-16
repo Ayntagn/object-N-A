@@ -1,4 +1,4 @@
-// spec: EV-UI-247 / EV-UI-263, continuous Source spelling checks.
+// spec: FEAT-001 / EV-UI-247 / EV-UI-263 / EV-MYGO-257, continuous Source spelling checks.
 package ui
 
 import (
@@ -22,6 +22,56 @@ func TestSourceSpellingUsesByteRanges(t *testing.T) {
 	if len(diagnostics) != 2 || diagnostics[0].Start != 7 || diagnostics[0].End != 16 ||
 		diagnostics[1].Start != second || diagnostics[1].End != second+6 {
 		t.Fatalf("spelling diagnostics = %+v", diagnostics)
+	}
+}
+
+func TestSourceSpellingExcludesMarkdownCode(t *testing.T) {
+	const text = "\ufeff---\r\ntitle: `metadata`\r\n---\r\n" +
+		"😀 mispelled `qzxblorf`.\r\n\r\n" +
+		"> ~~~c\r\n> #include <stdio.h>\r\n> int qxz /* 😀 中 */\r\n> ~~~\r\n\r\n" +
+		"    indentedword\r\n\r\n中文 anothr.\r\n\r\n```unknown\r\nstillopen"
+	input := sourceSpellingInput(text)
+	for _, code := range []string{"qzxblorf", "#include <stdio.h>", "qxz", "indentedword", "stillopen"} {
+		if strings.Contains(input, code) {
+			t.Errorf("spelling input included code %q", code)
+		}
+	}
+	for _, prose := range []string{"title: `metadata`", "😀 mispelled", "中文 anothr."} {
+		if !strings.Contains(input, prose) {
+			t.Errorf("spelling input lost %q", prose)
+		}
+	}
+	if mygoui.UTF16Len(input) != mygoui.UTF16Len(text) || strings.Count(input, "\r\n") != strings.Count(text, "\r\n") {
+		t.Fatal("the spelling input changed the source offsets or line endings")
+	}
+	offset := strings.Index(input, "anothr")
+	if offset < 0 {
+		t.Fatal("the spelling input lost the word after the code blocks")
+	}
+	ranges := []sourceSpellingRange{{Location: uint(mygoui.UTF16Len(input[:offset])), Length: 6}}
+	diagnostics := sourceSpellingDiagnostics(text, ranges)
+	start := strings.Index(text, "anothr")
+	if len(diagnostics) != 1 || diagnostics[0].Start != start || diagnostics[0].End != start+6 {
+		t.Fatalf("spelling diagnostics after code = %+v, want byte range %d:%d", diagnostics, start, start+6)
+	}
+}
+
+func TestSourceSpellingExcludesMarkdownMath(t *testing.T) {
+	const text = "😀 中文 mispelled before.\r\n\r\n# Heading\r\n$$\r\n\\begin{aligned}\r\n" +
+		"x &= \\mathrm{m}\\cdot y \\Longrightarrow \\text{😀 中}\r\n\\end{aligned}\r\n$$\r\n\r\n" +
+		"Display $$\\sqrtt{x}$$ in prose.\r\n\r\n> \\[\r\n> \\arccot{x}\r\n> \\]\r\n\r\n" +
+		"中文 anothr after.\r\n\r\n$$\r\n\\approx{y}"
+	input := sourceSpellingInput(text)
+	for _, cmd := range []string{`\begin`, `\mathrm`, `\cdot`, `\Longrightarrow`, `\sqrtt`, `\arccot`, `\approx`} {
+		if strings.Contains(input, cmd) {
+			t.Errorf("spelling input included formula command %q", cmd)
+		}
+	}
+	start := strings.Index(input, "anothr")
+	if start < 0 || !strings.Contains(input, "mispelled before.") || !strings.Contains(input, "in prose.") ||
+		mygoui.UTF16Len(input[:start]) != mygoui.UTF16Len(text[:strings.Index(text, "anothr")]) ||
+		mygoui.UTF16Len(input) != mygoui.UTF16Len(text) || strings.Count(input, "\r\n") != strings.Count(text, "\r\n") {
+		t.Fatal("excluding formulas changed prose, source offsets, or line endings")
 	}
 }
 

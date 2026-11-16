@@ -8,7 +8,7 @@ import (
 	"cyberwriter/ui"
 )
 
-const version = "v0.1.0"
+const version = "v0.3.0"
 
 func main() {
 	vault := flag.String("vault", "", "open a Vault directory on startup")

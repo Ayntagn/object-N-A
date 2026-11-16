@@ -29,6 +29,14 @@ type documentPreviewTheme struct {
 	BodyFontFamily, HeadingFontFamily, CodeFontFamily string
 	BaseFontSize, ParagraphSpacing, HeadingSpacing    int
 	LineHeight                                        float64
+	editorFont                                        *documentEditorFont
+}
+
+func (theme documentPreviewTheme) withEditorFont(preference string) documentPreviewTheme {
+	font := resolveDocumentEditorFont(preference)
+	theme.editorFont = font
+	theme.BodyFontFamily, theme.HeadingFontFamily, theme.CodeFontFamily = font.cssFamily, font.cssFamily, font.cssFamily
+	return theme
 }
 
 // The palette data comes from re/ui/design-tokens.json (EV-UI-063).
@@ -306,11 +314,17 @@ func (theme documentPreviewTheme) markdownTheme(zoom int, spacing float64) *mark
 		QuoteBar: mygoui.Hex(theme.BlockquoteBorderColor), QuoteText: mygoui.Hex(theme.BlockquoteTextColor),
 		TableBorder: mygoui.Hex(theme.TableBorderColor), TableHeader: mygoui.Hex(theme.TableHeaderBackground),
 	}
-	if font, _, _ := strings.Cut(theme.BodyFontFamily, ","); !strings.HasPrefix(font, "-") {
+	if theme.editorFont != nil {
+		theme.editorFont.applyNative(style)
+	} else if font, _, _ := strings.Cut(theme.BodyFontFamily, ","); !strings.HasPrefix(font, "-") {
 		style.Font = strings.Trim(font, `"' `)
 	}
 	for i := range style.Headings {
 		style.Headings[i].Color = mygoui.Hex(theme.HeadingColor)
 	}
 	return style
+}
+
+func (font *documentEditorFont) applyNative(style *markdown.Theme) {
+	style.Font, style.CodeFont = font.nativeFamily, font.nativeFamily
 }

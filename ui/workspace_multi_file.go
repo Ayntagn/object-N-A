@@ -268,13 +268,15 @@ func (app *workspaceWindow) drawMultiFileMarkdown(c *mygoui.Context, tab *worksp
 		}
 	}
 	source := tab.draft.String()
+	theme := app.resolvePreviewTheme(tab.previewThemeID).withEditorFont(app.preferences.EditorFont)
+	scroll.FontFeatures(theme.editorFont.features)
 	if !c.Preferences().HighContrast {
-		theme := app.resolvePreviewTheme(tab.previewThemeID)
 		scroll.Background(mygoui.Hex(theme.BackgroundColor))
 		state.options.Theme = theme.markdownTheme(100, previewLineSpacing(source, app.preferences.Export.spacing()))
 		state.options.Theme.CodeColors = previewCodeTheme(theme.dark())
 	} else {
-		state.options.Theme = nil
+		state.options.Theme = &markdown.Theme{}
+		theme.editorFont.applyNative(state.options.Theme)
 	}
 	if tab.previewAnchor != "" {
 		state.options.Anchor = tab.previewAnchor
@@ -294,7 +296,7 @@ func (app *workspaceWindow) drawMultiFileMarkdown(c *mygoui.Context, tab *worksp
 			app.selectMultiFileTile(tab)
 		}
 	}).Children(func() {
-		markdown.View(c, body, state.options).FillWidth()
+		markdown.View(c, nativeHighlightedMarkdown(scroll, body, state.options.Extensions), state.options).FillWidth()
 	})
 }
 

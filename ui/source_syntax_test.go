@@ -1,7 +1,8 @@
-// spec: FEAT-001 / EV-UI-058
+// spec: FEAT-001 / EV-UI-058 / EV-MYGO-264
 package ui
 
 import (
+	"math"
 	"os"
 	"slices"
 	"testing"
@@ -9,6 +10,40 @@ import (
 	mygoui "github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
 )
+
+func TestSourceCodeFencesUseUprightFaces(t *testing.T) {
+	const note = "*emphasis*\n\n```go\npackage main\nfunc getting() {}\n// comment\n```\n\n~~~markdown\n*emphasis*\n~~~\n"
+	app, tester, _ := snippetsWorkspace(t, "Code faces.md", note, sourceMode)
+	app.preferences.EditorTheme = "night-owl"
+	// The bundled upright and italic faces have different advances, so the
+	// caret can distinguish the font actually used by the editor.
+	app.preferences.EditorFont = "Noto Sans"
+	app.preferences.FontSize = 24
+	tester.Frame()
+	snapshot := app.draft.Snapshot()
+	for _, sample := range []struct {
+		line   int
+		italic bool
+	}{{3, false}, {4, false}, {5, false}, {9, false}, {0, true}} {
+		line := snapshot.Line(sample.line)
+		app.code.Select(snapshot.LineStart(sample.line), snapshot.LineStart(sample.line))
+		tester.Frame()
+		beginning, present := tester.TextCaret()
+		if !present {
+			t.Fatal("the source editor caret is missing")
+		}
+		for range len(line) {
+			tester.Key(0, mygoui.KeyRight)
+		}
+		end, present := tester.TextCaret()
+		font := app.code.Font
+		font.Italic = sample.italic
+		want := mygoui.ShapeText(line, font, 0).CaretAt(mygoui.TextCaretPosition{Index: len(line)}).X
+		if got := end.X - beginning.X; !present || end.Y != beginning.Y || math.Abs(float64(got-want)) > 0.1 {
+			t.Errorf("line %d (%q), italic=%t: caret advance %.3f pt, want %.3f pt on the same row", sample.line, line, sample.italic, got, want)
+		}
+	}
+}
 
 func TestSourceSyntaxToolbarAndSharedPreference(t *testing.T) {
 	t.Setenv("CYBERWRITER_CONFIG_DIR", t.TempDir())

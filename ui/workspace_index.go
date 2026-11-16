@@ -100,20 +100,21 @@ func (app *workspaceWindow) startVaultWatch() {
 			},
 		})
 		if err != nil {
+			pollVault(ctx, scan)
 			return
 		}
-		defer watch.Close()
 		// Refresh once the watch is enrolled to cover the interval between
 		// the initial directory snapshot and the first observable event.
 		scan(true)
 		for {
 			if _, err := watch.Next(ctx); err != nil {
-				return
+				break
 			}
 			scan(true)
 		}
+		watch.Close()
+		pollVault(ctx, scan)
 	}()
-	go pollVault(ctx, scan)
 }
 
 func pollVault(ctx context.Context, scan func(bool)) {

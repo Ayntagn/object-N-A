@@ -109,7 +109,11 @@ func sourceThemeFromPalette(background, text uint32, styles map[editor.TokenKind
 		return mygoui.RGB(uint8(color>>16), uint8(color>>8), uint8(color))
 	}
 	foreground := rgb(text)
-	theme := &editor.Theme{Background: rgb(background), Text: foreground, LineNumber: foreground.Alpha(0.55), ActiveLineNumber: foreground}
+	theme := &editor.Theme{
+		Background: rgb(background), Text: foreground,
+		LineNumber: foreground.Alpha(0.55), ActiveLineNumber: foreground,
+		UprightFencedCode: true,
+	}
 	for kind := range theme.Tokens {
 		theme.Tokens[kind].Color = foreground
 	}

@@ -5,3 +5,7 @@
 /ui/webassets/katex/fonts/*.woff2
 /ui/webassets/katex/katex.min.js
 /ui/webassets/katex/katex.min.css
+
+# MyGo sources prepared by cmd/assets
+/third_party/mygo/
+/third_party/.mygo-*/

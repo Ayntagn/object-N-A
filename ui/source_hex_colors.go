@@ -81,7 +81,7 @@ func sourceMarkdownHexLanguage(collapsed bool) *editor.Language {
 			return base.Tokenize(line, state, tokens)
 		}
 		original, next := base.Tokenize(line, state, nil)
-		// Keep the original token kinds on both sides of each swatch.
+		// Keep the original token styles and fence metadata around each swatch.
 		position, index := 0, 0
 		for _, swatch := range ranges {
 			for index < len(original) && original[index].End <= swatch.Start {
@@ -93,11 +93,12 @@ func sourceMarkdownHexLanguage(collapsed bool) *editor.Language {
 				index++
 			}
 			if position < swatch.Start {
-				kind := editor.TokenText
+				token := editor.Token{End: swatch.Start, Kind: editor.TokenText}
 				if index < len(original) {
-					kind = original[index].Kind
+					token = original[index]
+					token.End = swatch.Start
 				}
-				tokens = append(tokens, editor.Token{End: swatch.Start, Kind: kind})
+				tokens = append(tokens, token)
 			}
 			tokens = append(tokens, editor.Token{End: swatch.End, Kind: sourceHexToken})
 			position = swatch.End

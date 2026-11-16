@@ -18,7 +18,10 @@ type pdfAppearance struct {
 
 type pdfColorPreset struct{ label, hex string }
 
-const pdfThemeDefault = "Theme Default"
+const (
+	pdfThemeDefault      = "Theme Default"
+	pdfEditorFontDefault = "Editor Font"
+)
 
 var pdfPaperPresets = []pdfColorPreset{
 	{pdfThemeDefault, ""}, {"White", "#ffffff"}, {"Light Gray", "#f5f5f5"},
@@ -37,6 +40,8 @@ var pdfFontChoices = []string{
 	pdfThemeDefault, "System Default", "Space Grotesk", "Serif", "Sans Serif", "Georgia", "Palatino",
 	"Times New Roman", "Helvetica", "Arial", "Verdana", "JetBrains Mono", "Fira Code", "Cascadia Code",
 }
+
+var pdfInheritedFontChoices = append([]string{pdfEditorFontDefault}, pdfFontChoices[1:]...)
 
 func pdfPresetIndex(presets []pdfColorPreset, value string) int {
 	return max(0, slices.IndexFunc(presets, func(preset pdfColorPreset) bool { return preset.hex == value }))
@@ -75,7 +80,7 @@ func pdfFontLabel(font exportdoc.FontFamily) string {
 }
 
 func pdfFontChoice(label string) exportdoc.FontFamily {
-	if label == pdfThemeDefault {
+	if label == pdfThemeDefault || label == pdfEditorFontDefault {
 		return ""
 	}
 	return exportdoc.FontFamily(label)
@@ -106,9 +111,16 @@ func (s *workspaceExportSheet) appearanceOptions(c *mygoui.Context) {
 		mygoui.Text(c, fmt.Sprintf("%.0f%%", s.form.layout.FontScale)).Width(47).MarginStart(12)
 	})
 	font := pdfFontLabel(s.form.layout.FontFamily)
+	choices := pdfFontChoices
+	if s.format == exportPDF {
+		choices = pdfInheritedFontChoices
+		if font == pdfThemeDefault {
+			font = pdfEditorFontDefault
+		}
+	}
 	mygoui.Row(c.Key("pdf-font")).AlignItems(mygoui.Center).Height(31).Gap(8).Children(func() {
 		mygoui.Text(c, "Font").SingleLine()
-		mygoui.Select(c, &font, pdfFontChoices).Size(160, 24).Label("Font").
+		mygoui.Select(c, &font, choices).Size(160, 24).Label("Font").
 			Background(c.Theme().SurfaceHover).Disabled(s.busy).OnChange(func() {
 			s.form.layout.FontFamily = pdfFontChoice(font)
 		})

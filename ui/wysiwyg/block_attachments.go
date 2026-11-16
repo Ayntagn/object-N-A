@@ -117,7 +117,7 @@ func projectBlockParagraphs(doc *parser.Document, source string) (string, map[st
 				}
 			}
 		case parser.Table:
-			if region, ok := readTableRegion(doc, i, 0); ok && supportsVisualTable(doc, i) {
+			if region, ok := readTableRegion(doc, i, 0); ok && supportsVisualTable(doc, i, region.end) {
 				end = region.end
 				table := newVisualTable(source[region.start:end], region.relative(), "", 0)
 				address, label, paragraph = table.object.URL, tableLabel, attachmentParagraph(table.object)

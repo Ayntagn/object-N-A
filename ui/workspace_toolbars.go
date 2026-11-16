@@ -310,7 +310,10 @@ func (app *workspaceWindow) paneFormatButtons(c *mygoui.Context, apply func(mark
 			continue
 		}
 		action := paneAction(apply != nil && command.format != "", func() { apply(command.format) })
-		chromeButton(key, command.symbol, command.label, action).Size(26, 22).MarginEnd(2)
+		button := chromeButton(key, command.symbol, command.label, action).Size(26, 22).MarginEnd(2)
+		if command.format == highlightFormat && app.displayedMode() == wysiwygMode {
+			button.KeepFocus()
+		}
 	}
 }
 

@@ -364,8 +364,9 @@ func (app *workspaceWindow) tabBar(c *mygoui.Context) {
 				app.activateTab(app.tabs[selected])
 			}
 		})
+		app.revealActiveTab = false
+		app.tabDropTarget(c, tabs.List, 14)
 	})
-	app.revealActiveTab = false
 }
 
 func tabWidth(windowWidth float32, count, index int) float32 {

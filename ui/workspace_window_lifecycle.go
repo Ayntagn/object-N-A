@@ -26,10 +26,28 @@ type workspaceApplication struct {
 	pdfWindows      map[string]*workspacePDFWindow
 	imageWindows    map[string]*workspaceImageWindow
 	quitSession     *savedSession
+	quitting        bool
 	closeErr        error
 	idlePicker      bool
 
 	deferredVaultOffers map[string]bool
+}
+
+func (a *workspaceApplication) prepareWorkspace(root string, session savedSession) (*workspaceWindow, bool) {
+	if root == "" {
+		root = session.Vault
+	}
+	app := a.newWindow(&workspaceTab{mode: a.preferences.DefaultView}, nil)
+	opened := root != "" && app.openVault(root)
+	if opened {
+		a.restoreSession(app, session)
+	}
+	if app.draft == nil && app.drawing == nil {
+		app.setTabDocument(app.workspaceTab, workspace.Document{})
+		app.initialEmptyTab = true
+		app.activateTab(app.workspaceTab)
+	}
+	return app, opened
 }
 
 func (a *workspaceApplication) newWindow(tab *workspaceTab, origin *workspaceWindow) *workspaceWindow {
@@ -181,6 +199,12 @@ func (app *workspaceWindow) moveTabToNewWindow() {
 func (a *workspaceApplication) installSessionLifecycle() {
 	if runtime.GOOS == "darwin" {
 		mygo.App.OnWindowAllClosed(a.installDocumentlessMenu)
+		mygo.App.OnActivate(func(hasVisibleWindows bool) {
+			if !hasVisibleWindows {
+				// Defer creation until AppKit's reopen handler has returned.
+				mygo.App.WhenReady(a.reopenWorkspace)
+			}
+		})
 	}
 	mygo.App.OnBeforeQuit(func(_ *mygo.QuitEvent) {
 		a.quitSession = nil
@@ -190,11 +214,34 @@ func (a *workspaceApplication) installSessionLifecycle() {
 		}
 	})
 	mygo.App.OnWillQuit(func(_ *mygo.QuitEvent) {
+		a.quitting = true
 		if a.quitSession != nil {
 			a.preferences.Session = *a.quitSession
 			a.closeErr = errors.Join(a.closeErr, a.preferences.write())
 		}
 	})
+}
+
+func (a *workspaceApplication) reopenWorkspace() {
+	if a.quitting || len(a.windows) != 0 || a.idlePicker || a.splash != nil {
+		return
+	}
+	previous := a.preferences.Session
+	// A warm reopen starts a blank document in the current Vault. Keep the
+	// browsing context without reopening the closed document tabs.
+	session := savedSession{
+		Vault: previous.Vault,
+		savedWindow: savedWindow{
+			Recent:      previous.Recent,
+			PreviewZoom: previous.PreviewZoom,
+		},
+	}
+	app, opened := a.prepareWorkspace("", session)
+	a.activate(app)
+	if opened {
+		app.persistSession()
+	}
+	app.win.Show()
 }
 
 func (a *workspaceApplication) installDocumentlessMenu() {

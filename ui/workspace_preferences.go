@@ -26,7 +26,7 @@ type workspacePreferences struct {
 	AutoIndentParagraphs        bool                        `json:"autoIndentParagraphs,omitempty"`
 	MarkdownShortcuts           mdshortcuts.Config          `json:"markdownShortcuts,omitzero"`
 	FontSize                    int                         `json:"fontSize"`
-	EditorFont                  string                      `json:"editorFontFamily,omitempty"`
+	EditorFont                  string                      `json:"editorFontFamily"` // Empty explicitly selects System Mono.
 	EditorLineHeight            float64                     `json:"editorLineHeight,omitempty"`
 	EditorTheme                 string                      `json:"editorThemeRawValue,omitempty"`
 	DisableSyntaxHighlighting   bool                        `json:"debugDisableHighlighting,omitempty"`
@@ -116,6 +116,7 @@ func loadWorkspacePreferences() (workspacePreferences, error) {
 	defaults := workspacePreferences{
 		Appearance: appearanceBlackout, PreviewThemeID: systemPreviewThemeID,
 		DefaultView: splitMode, EditorTheme: systemSourceThemeID, TypewriterPosition: 0.5,
+		EditorFont:        sourceFontDefaultFamily,
 		ScrollSyncEnabled: true, ScrollPastEnd: true, AIStreamIntoEditor: true,
 		SpellCheckEnabled:      true,
 		DrawingsOpenSeparately: true,

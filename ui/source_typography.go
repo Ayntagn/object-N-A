@@ -16,11 +16,15 @@ import (
 )
 
 const (
-	sourceFontDefault = 14
-	sourceFontMin     = 8
-	sourceFontMenuMin = 10
-	sourceFontMax     = 32
-	systemMonoLabel   = "System Mono"
+	sourceFontDefault       = 14
+	sourceFontMin           = 8
+	sourceFontMenuMin       = 10
+	sourceFontMax           = 32
+	sourceFontDefaultFamily = "Maple Mono"
+	sourceMapleMonoNFCN     = "Maple Mono NF CN"
+	systemMonoLabel         = "System Mono"
+	// EV-MYGO-265: Obsidian's local profile applies to both Maple Mono faces.
+	mapleMonoOpenTypeFeatures = "calt, cv02, cv05, cv09, cv10, cv61, ss07, ss08, ss09, ss10, ss11"
 )
 
 //go:embed fonts/*.ttf.gz
@@ -32,14 +36,36 @@ type sourceFontChoice struct {
 	load  sync.Once
 }
 
-// EV-UI-055 records the recommended families and their order.
+// EV-UI-055 records the original recommended families. EV-MYGO-258 adds Maple Mono.
 var sourceFontChoices = [...]sourceFontChoice{
+	{name: sourceFontDefaultFamily, files: []string{"MapleMono-Regular", "MapleMono-Bold", "MapleMono-Italic", "MapleMono-BoldItalic"}},
 	{name: "JetBrains Mono", files: []string{"JetBrainsMono-Regular"}},
 	{name: "Fira Code", files: []string{"FiraCode-Regular"}},
 	{name: "Cascadia Code", files: []string{"CascadiaCode-Regular"}},
 	{name: "Space Grotesk", files: []string{"SpaceGrotesk-Variable"}},
 	{name: "Nunito Sans", files: []string{"NunitoSans-Variable", "NunitoSans-Italic-Variable"}},
 	{name: "Noto Sans", files: []string{"NotoSans-Variable", "NotoSans-Italic-Variable"}},
+}
+
+var preferredMapleMonoFamily = sync.OnceValue(func() string {
+	for _, family := range mygoui.FontFamilies() {
+		if strings.EqualFold(family.Name, sourceMapleMonoNFCN) {
+			return family.Name
+		}
+	}
+	return sourceFontDefaultFamily
+})
+
+// "Maple Mono" was also the default persisted by build 162. Resolve that
+// preference through the local family's availability so existing settings
+// pick up the same Maple variant as Obsidian (EV-MYGO-261).
+func resolvedSourceFontFamily(family string) string {
+	switch family {
+	case sourceFontDefaultFamily, sourceMapleMonoNFCN:
+		return preferredMapleMonoFamily()
+	default:
+		return family
+	}
 }
 
 func (app *workspaceWindow) sourceFontSize() int {
@@ -98,7 +124,7 @@ func (app *workspaceWindow) editorFontLabel() string {
 	if app.preferences.EditorFont == "" {
 		return app.tr(systemMonoLabel, "系统等宽字体")
 	}
-	return app.preferences.EditorFont
+	return resolvedSourceFontFamily(app.preferences.EditorFont)
 }
 
 func (app *workspaceWindow) editorFontMenu(m *mygoui.Menu) {
@@ -106,20 +132,25 @@ func (app *workspaceWindow) editorFontMenu(m *mygoui.Menu) {
 }
 
 func (app *workspaceWindow) editorFontMenuWithSystem(m *mygoui.Menu, systemLabel string) {
+	selected := resolvedSourceFontFamily(app.preferences.EditorFont)
 	choose := func(label, family string) {
-		if m.Item(label).Checked(app.preferences.EditorFont == family).Chosen() {
+		if m.Item(label).Checked(selected == resolvedSourceFontFamily(family)).Chosen() {
 			app.preferences.EditorFont = family
 			app.preferencesChanged()
 		}
 	}
 	choose(systemLabel, "")
+	recommended := make(map[string]bool, len(sourceFontChoices)+1)
 	for i := range sourceFontChoices {
 		name := sourceFontChoices[i].name
-		choose(name, name)
+		label := resolvedSourceFontFamily(name)
+		choose(label, name)
+		recommended[strings.ToLower(name)] = true
+		recommended[strings.ToLower(label)] = true
 	}
 	m.Separator()
 	families := mygoui.FontFamilies()
-	// Surface installed Maple Mono variants without changing the built-in group.
+	// Surface additional Maple Mono variants first among the installed fonts.
 	installedOrder := func(name string) int {
 		if name == "maple mono" || strings.HasPrefix(name, "maple mono ") {
 			return 0
@@ -134,11 +165,14 @@ func (app *workspaceWindow) editorFontMenuWithSystem(m *mygoui.Menu, systemLabel
 		return strings.Compare(an, bn)
 	})
 	for _, family := range families {
-		choose(family.Name, family.Name)
+		if !recommended[strings.ToLower(family.Name)] {
+			choose(family.Name, family.Name)
+		}
 	}
 }
 
 func sourceEditorFontFamily(family string) string {
+	family = resolvedSourceFontFamily(family)
 	if family == "" {
 		return ""
 	}
