@@ -14,6 +14,7 @@ import (
 // Index is a read-only snapshot. A caller can rebuild and replace it when the
 // Vault changes.
 type Index struct {
+	vault         *workspace.Vault
 	notes         []note
 	byPath        map[string]int
 	byStem        map[string][]int
@@ -28,12 +29,14 @@ type Index struct {
 
 type note struct {
 	entry        workspace.Entry
+	stamp        workspace.IndexedNoteStamp
 	lowerPath    string
 	lowerBody    string
 	tags         []string
 	graphTags    []string
 	graphTargets map[string]struct{}
 	properties   map[string]workspace.Property
+	links        []noteLink
 }
 
 // Edge is one directed relationship between two Vault-relative note paths.
@@ -49,6 +52,17 @@ func Build(vault *workspace.Vault, entries []workspace.Entry) (*Index, error) {
 }
 
 func build(vault *workspace.Vault, entries []workspace.Entry, readNote func(workspace.Document)) (*Index, error) {
+	return buildSnapshot(vault, entries, nil, readNote)
+}
+
+// Refresh builds the next read-only snapshot, reusing parsed notes whose
+// on-disk identity and change time are unchanged. New paths still participate
+// in resolving links from every note.
+func (previous *Index) Refresh(vault *workspace.Vault, entries []workspace.Entry) (*Index, error) {
+	return buildSnapshot(vault, entries, previous, nil)
+}
+
+func buildSnapshot(vault *workspace.Vault, entries []workspace.Entry, previous *Index, readNote func(workspace.Document)) (*Index, error) {
 	if vault == nil {
 		return nil, errors.New("open a Vault before indexing")
 	}
@@ -59,15 +73,101 @@ func build(vault *workspace.Vault, entries []workspace.Entry, readNote func(work
 			return nil, err
 		}
 	}
-	index := &Index{
-		notes:  collectNotes(nil, entries),
-		byPath: make(map[string]int),
-		byStem: make(map[string][]int),
-		byName: make(map[string][]int),
+	index := &Index{vault: vault, notes: collectNotes(make([]note, 0, countNotes(entries)), entries)}
+	if previous != nil && previous.vault != vault {
+		previous = nil
 	}
 	slices.SortFunc(index.notes, func(a, b note) int {
 		return strings.Compare(a.entry.Path, b.entry.Path)
 	})
+	same := previous != nil && len(index.notes) == len(previous.notes)
+	for id := range index.notes {
+		current := &index.notes[id]
+		var old *note
+		if previous != nil {
+			if from, ok := previous.byPath[current.entry.Path]; ok {
+				old = &previous.notes[from]
+			}
+		}
+		if current.load(vault, old, readNote) {
+			same = same && current.entry.Name == old.entry.Name &&
+				current.entry.ModTime() == old.entry.ModTime() && current.entry.Size() == old.entry.Size()
+		} else {
+			same = false
+		}
+	}
+	if same {
+		return previous, nil
+	}
+	index.buildRelationships()
+	return index, nil
+}
+
+func (n *note) load(vault *workspace.Vault, old *note, readNote func(workspace.Document)) (reused bool) {
+	source := n.entry.Path
+	var text string
+	if readNote != nil {
+		document, err := vault.ReadDocument(source)
+		if err != nil {
+			return false
+		}
+		readNote(document)
+		text = document.Text
+	} else {
+		var stamp workspace.IndexedNoteStamp
+		if old != nil {
+			stamp = old.stamp
+		}
+		content, currentStamp, unchanged, err := vault.ReadIndexedNote(source, stamp)
+		if err != nil {
+			return false
+		}
+		if unchanged {
+			entry := n.entry
+			*n = *old
+			n.entry = entry
+			return true
+		}
+		text, n.stamp = content, currentStamp
+	}
+	n.graphTargets = collectGraphTargets(text)
+	_, properties, body := workspace.SplitFrontmatter(text)
+	if properties != "" {
+		if parsed, err := workspace.ReadProperties(text); err == nil && len(parsed.Rows) > 0 {
+			n.properties = make(map[string]workspace.Property, len(parsed.Rows))
+			for _, property := range parsed.Rows {
+				n.properties[strings.ToLower(property.Key)] = property
+			}
+		}
+	}
+	n.graphTags = collectGraphTags(text, properties)
+	n.lowerBody = strings.ToLower(body)
+	metadata := parseMetadata(properties, body)
+	n.tags = metadata.tags
+	n.links = metadata.links
+	if len(n.links) > 0 {
+		// Retain each target only once and detach it from the source buffer.
+		slices.SortFunc(n.links, func(a, b noteLink) int {
+			if a.markdown != b.markdown {
+				if a.markdown {
+					return 1
+				}
+				return -1
+			}
+			return strings.Compare(a.target, b.target)
+		})
+		n.links = slices.Clone(slices.Compact(n.links))
+		for at := range n.links {
+			n.links[at].target = strings.Clone(n.links[at].target)
+		}
+	}
+	return false
+}
+
+func (index *Index) buildRelationships() {
+	index.byPath = make(map[string]int, len(index.notes))
+	index.byStem = make(map[string][]int, len(index.notes))
+	index.byName = make(map[string][]int, len(index.notes))
 	index.incoming = make([][]int, len(index.notes))
 	index.outgoing = make([][]int, len(index.notes))
 	for id, note := range index.notes {
@@ -85,29 +185,9 @@ func build(vault *workspace.Vault, entries []workspace.Entry, readNote func(work
 	for id := range index.notes {
 		note := &index.notes[id]
 		source := note.entry.Path
-		document, err := vault.ReadDocument(source)
-		if err != nil {
-			continue
-		}
-		if readNote != nil {
-			readNote(document)
-		}
-		note.graphTargets = graphLinks.add(id, source, document.Text)
-		_, properties, body := workspace.SplitFrontmatter(document.Text)
-		if properties != "" {
-			if parsed, err := workspace.ReadProperties(document.Text); err == nil && len(parsed.Rows) > 0 {
-				note.properties = make(map[string]workspace.Property, len(parsed.Rows))
-				for _, property := range parsed.Rows {
-					note.properties[strings.ToLower(property.Key)] = property
-				}
-			}
-		}
-		note.graphTags = collectGraphTags(document.Text, properties)
-		note.lowerBody = strings.ToLower(body)
-		metadata := parseMetadata(properties, body)
-		note.tags = metadata.tags
+		graphLinks.add(id, source, note.graphTargets)
 		var targets []int
-		for _, link := range metadata.links {
+		for _, link := range note.links {
 			var target string
 			var ok bool
 			if link.markdown {
@@ -125,9 +205,23 @@ func build(vault *workspace.Vault, entries []workspace.Entry, readNote func(work
 		for _, target := range targets {
 			index.incoming[target] = append(index.incoming[target], id)
 		}
+		if note.stamp == (workspace.IndexedNoteStamp{}) {
+			note.links = nil
+		}
 	}
 	index.graph = graphLinks.snapshot(index)
-	return index, nil
+}
+
+func countNotes(entries []workspace.Entry) int {
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir {
+			count += countNotes(entry.Children)
+		} else if workspace.IsMarkdownPath(entry.Path) {
+			count++
+		}
+	}
+	return count
 }
 
 func collectNotes(notes []note, entries []workspace.Entry) []note {

@@ -996,6 +996,11 @@ func (v *view) measureWraps(near int, budget time.Duration) bool {
 		}
 		return true
 	})
+	if w.known >= n {
+		// A local edit can be fully measured by the viewport pass.
+		v.wrapAt = n
+		return true
+	}
 	count, bytes := 0, 0
 	for v.wrapAt < n {
 		from := v.wrapAt

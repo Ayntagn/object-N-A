@@ -110,6 +110,11 @@ func (app *workspaceWindow) publishSourceSpelling(tab *workspaceTab, check *sour
 // Preserve line endings and UTF-16 offsets into the original source.
 func sourceSpellingInput(text string) string {
 	prefix, _, body := workspace.SplitFrontmatter(text)
+	// Code and math need a delimiter or at least four columns of indent.
+	// Ordinary prose can go straight to the checker.
+	if !strings.ContainsAny(body, "`~$\\\t") && !strings.Contains(body, "    ") {
+		return text
+	}
 	doc := parser.Parse(body)
 	var input strings.Builder
 	next := 0
@@ -161,9 +166,11 @@ func sourceSpellingDiagnostics(text string, ranges []sourceSpellingRange) []edit
 	var diagnostics []editor.Diagnostic
 	var byteOffset int
 	var units uint
-	length := uint(mygoui.UTF16Len(text))
+	// Each UTF-16 unit needs at least one UTF-8 byte. Use that cheap upper
+	// bound here and validate the exact lengths as each range is decoded.
+	limit := uint(len(text))
 	for _, span := range ranges {
-		if span.Length == 0 || span.Location < units || span.Location >= length || span.Length > length-span.Location {
+		if span.Length == 0 || span.Location < units || span.Location >= limit || span.Length > limit-span.Location {
 			continue
 		}
 		start := byteOffset + mygoui.UTF16ByteOffset(text[byteOffset:], int(span.Location-units))

@@ -81,14 +81,15 @@ var graphHashtag = regexp.MustCompile(`(?:^|[\s\p{Z}\x{0085}\v])#([A-Za-z][\p{L}
 
 func collectGraphTags(source, properties string) []string {
 	tags := frontmatterTags(properties)
-	for _, match := range graphHashtag.FindAllStringSubmatch(source, -1) {
-		tag := strings.ToLower(match[1])
-		if !isHexColor(tag) {
-			tags = append(tags, tag)
+	if mayHaveInlineTag(source) {
+		for _, match := range graphHashtag.FindAllStringSubmatch(source, -1) {
+			tag := strings.ToLower(match[1])
+			if !isHexColor(tag) {
+				tags = append(tags, tag)
+			}
 		}
 	}
-	slices.Sort(tags)
-	return slices.Compact(tags)
+	return uniqueTags(tags)
 }
 
 func isHexColor(tag string) bool {
@@ -106,7 +107,10 @@ type graphLinkIndex struct {
 	reverse map[string][]int
 }
 
-func (links graphLinkIndex) add(sourceID int, source, text string) map[string]struct{} {
+func collectGraphTargets(text string) map[string]struct{} {
+	if !strings.Contains(text, "[[") {
+		return nil
+	}
 	matches := graphWikilink.FindAllStringSubmatch(text, -1)
 	if len(matches) == 0 {
 		return nil
@@ -114,13 +118,21 @@ func (links graphLinkIndex) add(sourceID int, source, text string) map[string]st
 	targets := make(map[string]struct{})
 	for _, match := range matches {
 		target := graphTargetName(match[1])
-		targets[target] = struct{}{}
+		if _, found := targets[target]; !found {
+			targets[strings.Clone(target)] = struct{}{}
+		}
+	}
+	return targets
+}
+
+func (links graphLinkIndex) add(sourceID int, source string, targets map[string]struct{}) {
+	if len(targets) == 0 {
+		return
 	}
 	for target := range targets {
 		links.reverse[target] = append(links.reverse[target], sourceID)
 	}
 	links.forward[graphNoteName(source)] = targets
-	return targets
 }
 
 func graphTargetName(target string) string {

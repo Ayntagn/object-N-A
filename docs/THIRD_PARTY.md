@@ -29,4 +29,4 @@
 
 运行依赖和校验由 [go.mod](../go.mod) 与 [go.sum](../go.sum) 固定。供嵌入的浏览器组件和字库由 `go run ./cmd/assets` 获取和核验。各资源目录保留对应许可证。
 
-`go run ./cmd/assets` 同时通过 Go 模块工具下载 MyGo v0.8.3 源码，并应用八个兼容文件。改动用于编辑器的软折行、输入法和代码围栏排版，按上游 MIT 许可分发。 [兼容源码与许可](../cmd/assets/mygo)
+`go run ./cmd/assets` 同时通过 Go 模块工具下载 MyGo v0.8.3 源码，并应用九个兼容文件。改动包括软折行的增量测量、输入法处理和代码围栏排版，按上游 MIT 许可分发。 [兼容源码与许可](../cmd/assets/mygo)

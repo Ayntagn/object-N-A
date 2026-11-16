@@ -86,7 +86,6 @@ func (a *workspaceApplication) newWindow(tab *workspaceTab, origin *workspaceWin
 	}
 	a.windows = append(a.windows, app)
 	app.win = mygo.NewWindow(options)
-	app.previewPane.init(app)
 	app.win.OnClose(app.closeRequested)
 	app.win.OnClosed(app.closeGraphWindow)
 	app.win.OnClosed(app.closePresentation)

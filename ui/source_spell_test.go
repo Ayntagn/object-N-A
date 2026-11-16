@@ -16,6 +16,7 @@ func TestSourceSpellingUsesByteRanges(t *testing.T) {
 		{Location: 1, Length: 1}, // Inside the emoji's UTF-16 surrogate pair.
 		{Location: 5, Length: 9},
 		{Location: uint(mygoui.UTF16Len(text[:second])), Length: 6},
+		{Location: uint(mygoui.UTF16Len(text) + 1), Length: 1}, // Within the byte length only.
 		{Location: ^uint(0), Length: 1},
 	}
 	diagnostics := sourceSpellingDiagnostics(text, ranges)
@@ -53,6 +54,18 @@ func TestSourceSpellingExcludesMarkdownCode(t *testing.T) {
 	start := strings.Index(text, "anothr")
 	if len(diagnostics) != 1 || diagnostics[0].Start != start || diagnostics[0].End != start+6 {
 		t.Fatalf("spelling diagnostics after code = %+v, want byte range %d:%d", diagnostics, start, start+6)
+	}
+}
+
+func TestSourceSpellingExcludesStandaloneIndentedCode(t *testing.T) {
+	for _, indent := range []string{"    ", "\t"} {
+		const prose = "正文 mispelled before.\n\n"
+		const code = "qxz"
+		text := prose + indent + code + "\n"
+		input := sourceSpellingInput(text)
+		if want := prose + indent + strings.Repeat(" ", len(code)) + "\n"; input != want {
+			t.Fatalf("spelling input for indent %q is %q, want %q", indent, input, want)
+		}
 	}
 }
 

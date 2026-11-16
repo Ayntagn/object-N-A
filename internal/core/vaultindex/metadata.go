@@ -21,6 +21,36 @@ type noteLink struct {
 
 func parseMetadata(properties, body string) noteMetadata {
 	metadata := noteMetadata{tags: frontmatterTags(properties)}
+	if strings.Contains(body, "[") || mayHaveInlineTag(body) {
+		metadata.parseBody(body)
+	}
+	metadata.tags = uniqueTags(metadata.tags)
+	return metadata
+}
+
+func mayHaveInlineTag(source string) bool {
+	for {
+		_, rest, found := strings.Cut(source, "#")
+		if !found {
+			return false
+		}
+		if next, _ := utf8.DecodeRuneInString(rest); tagRune(next) {
+			return true
+		}
+		source = rest
+	}
+}
+
+func uniqueTags(tags []string) []string {
+	slices.Sort(tags)
+	tags = slices.Clone(slices.Compact(tags))
+	for i := range tags {
+		tags[i] = strings.Clone(tags[i])
+	}
+	return tags
+}
+
+func (metadata *noteMetadata) parseBody(body string) {
 	document := parser.New(parser.GFM | parser.ExtFootnotes | parser.ExtMath | parser.ExtDollarMath)
 	document.Set(body)
 	for block := 1; block < document.Len(); block++ {
@@ -45,9 +75,6 @@ func parseMetadata(properties, body string) noteMetadata {
 		}
 		metadata.scanProse(body, start, end, inlines[plainAt:])
 	}
-	slices.Sort(metadata.tags)
-	metadata.tags = slices.Compact(metadata.tags)
-	return metadata
 }
 
 func (m *noteMetadata) scanProse(source string, start, end int, inlines []parser.Inline) {

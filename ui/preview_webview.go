@@ -1,6 +1,7 @@
 package ui
 
 import (
+	_ "embed"
 	"fmt"
 	"html"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"cyberwriter/internal/core/markdownhighlight"
 	"cyberwriter/internal/core/mermaid"
@@ -22,6 +24,11 @@ import (
 )
 
 const previewChangeEvent = "cyberwriter:preview-change"
+
+const (
+	longPreviewBytes    = 64 << 10
+	longPreviewInterval = 180 * time.Millisecond
+)
 
 var previewChanged = mygo.NewEvent[previewFrame](previewChangeEvent)
 
@@ -38,13 +45,17 @@ type previewFrame struct {
 	ScrollPastEnd bool    `json:"scrollPastEnd"`
 	Anchor        string  `json:"anchor,omitempty"`
 	RevealLine    int     `json:"revealLine,omitempty"`
+	Math          bool    `json:"math,omitempty"`
 }
 
 type workspacePreview struct {
 	view             *previewViewport
 	html             workspaceHTMLPreview
+	initAttempted    bool
+	awaitingDOM      bool
 	ready            bool
 	refreshPending   bool
+	mathRequested    bool
 	mermaidRequested bool
 	vegaRequested    bool
 	chartFiles       *previewChartFiles
@@ -65,6 +76,7 @@ type workspacePreview struct {
 	queryVault       *workspace.Vault
 	document         uint64
 	revision         uint64
+	lastFrameAt      time.Time
 	apiEnabled       bool
 	apiVersion       uint64
 	apiDocument      uint64
@@ -73,14 +85,18 @@ type workspacePreview struct {
 
 func (p *workspacePreview) init(app *workspaceWindow) {
 	win := app.win
-	if win == nil || win.IsDestroyed() || !mygo.WebViewAvailable() {
+	if p.initAttempted || win == nil || win.IsDestroyed() {
+		return
+	}
+	p.initAttempted = true
+	if !mygo.WebViewAvailable() {
 		return
 	}
 	view, err := newPreviewViewport(win, mygo.WebViewOptions{
 		Transparent: true,
 		Page: mygo.PageOptions{
 			Untrusted:     true,
-			PreloadScript: previewScript(),
+			PreloadScript: workspacePreviewScript,
 		},
 	})
 	if err != nil {
@@ -88,6 +104,7 @@ func (p *workspacePreview) init(app *workspaceWindow) {
 		return
 	}
 	p.view = view
+	p.awaitingDOM = true
 	page := view.Page()
 	markUnready := func() {
 		if p.view == view && p.ready {
@@ -96,14 +113,24 @@ func (p *workspacePreview) init(app *workspaceWindow) {
 		}
 	}
 	page.OnDidNavigate(func(string) { markUnready() })
-	page.OnRenderProcessGone(func(string) { markUnready() })
+	loadFailed := func() {
+		if p.view != view {
+			return
+		}
+		p.awaitingDOM, p.ready = false, false
+		win.Invalidate()
+	}
+	page.OnDidFailLoad(func(*mygo.LoadError) { loadFailed() })
+	page.OnRenderProcessGone(func(string) { loadFailed() })
 	page.OnDOMReady(func() {
 		if p.view != view {
 			return
 		}
-		p.ready = true
+		p.awaitingDOM, p.ready = false, true
+		p.theme = ""
 		p.zoom = 0
 		p.refreshPending = true
+		p.mathRequested = false
 		p.mermaidRequested = false
 		p.vegaRequested = false
 		win.Invalidate()
@@ -139,9 +166,11 @@ func (p *workspacePreview) init(app *workspaceWindow) {
 func (p *workspacePreview) refresh() {
 	p.refreshPending = true
 	p.html.tab = nil
+	p.mathRequested = false
 	p.mermaidRequested = false
 	p.vegaRequested = false
 	if p.view != nil && !p.view.IsDestroyed() && !p.ready {
+		p.awaitingDOM = true
 		p.view.Page().LoadHTML(previewPage, "")
 	}
 }
@@ -154,7 +183,9 @@ func (p *workspacePreview) returnToDocument(app *workspaceWindow) {
 	if view != nil && !view.IsDestroyed() {
 		view.Destroy()
 	}
-	p.init(app)
+	if app.previewDocumentType() != documentHTML {
+		p.init(app)
+	}
 }
 
 func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
@@ -178,6 +209,13 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 		theme = theme.withEditorFont(app.preferences.EditorFont)
 	}
 	p.html.close()
+	p.init(app)
+	if p.awaitingDOM && p.view != nil && !p.view.IsDestroyed() {
+		// Wait for the small WebView shell instead of laying out the entire
+		// document once in the native fallback and once in the WebView.
+		mygoui.WebView(c, p.view).Grow(1).MinWidth(0).MinHeight(0).Label(label)
+		return
+	}
 	if p.view == nil || p.view.IsDestroyed() || !p.ready {
 		if kind != documentMarkdown {
 			drawSourceFilePreview(c, label, text, badge, zoom)
@@ -220,17 +258,26 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 	}
 	apiEnabled := kind == documentMarkdown && app.previewAPIEnabled()
 	themeChanged := p.theme != theme.ID || p.editorFont != theme.editorFont
-	if switched || p.refreshPending || p.source != text || themeChanged || p.customCSS != customCSS ||
+	immediate := switched || themeChanged || p.customCSS != customCSS ||
 		p.lineSpacing != spacing || p.scrollPastEnd != app.preferences.ScrollPastEnd ||
 		p.numberFigures != app.preferences.NumberFigures || app.previewAnchor != "" ||
-		app.previewRevealLine > 0 ||
-		p.apiEnabled != apiEnabled || (apiEnabled && p.apiVersion != app.textVersion) {
+		app.previewRevealLine > 0 || p.apiEnabled != apiEnabled
+	changed := p.source != text
+	var wait time.Duration
+	if kind == documentMarkdown && changed && !immediate && len(text) >= longPreviewBytes {
+		wait = p.lastFrameAt.Add(longPreviewInterval).Sub(c.Now())
+	}
+	if wait > 0 {
+		// Rebuild from the latest draft once at the end of the interval. The
+		// current WebView stays mounted, including its selection and scroll.
+		c.After(wait)
+	} else if immediate || p.refreshPending || changed || apiEnabled && p.apiVersion != app.textVersion {
 		var themeFonts string
-		if themeChanged || p.refreshPending {
+		if themeChanged {
 			themeFonts = "@layer builtin {" + theme.cssVariables() + "}" + theme.fontFaces()
 		}
 		p.refreshPending = false
-		p.source, p.theme, p.editorFont, p.customCSS = text, theme.ID, theme.editorFont, customCSS
+		p.source, p.customCSS = text, customCSS
 		p.lineSpacing = spacing
 		p.scrollPastEnd = app.preferences.ScrollPastEnd
 		p.numberFigures = app.preferences.NumberFigures
@@ -265,16 +312,23 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 			body = sourceFilePreview(text, badge, theme.dark())
 		}
 		p.revision++
+		hasMath := containsPreviewMath(body)
 		frame := previewFrame{Revision: p.revision, Document: p.document, Title: title, Label: label, HTML: body,
-			Theme: p.theme, ThemeFonts: themeFonts, CustomCSS: customCSS, LineSpacing: spacing,
-			ScrollPastEnd: p.scrollPastEnd, Anchor: app.previewAnchor, RevealLine: app.previewRevealLine}
+			Theme: theme.ID, ThemeFonts: themeFonts, CustomCSS: customCSS, LineSpacing: spacing,
+			ScrollPastEnd: p.scrollPastEnd, Anchor: app.previewAnchor, RevealLine: app.previewRevealLine, Math: hasMath}
 		if err := previewChanged.EmitPage(p.view.Page(), frame); err != nil {
 			p.refreshPending = true
 			log.Printf("Update Markdown Preview: %v", err)
 		} else {
+			p.lastFrameAt = c.Now()
+			p.theme, p.editorFont = theme.ID, theme.editorFont
 			p.codeCopies = copies
 			app.previewAnchor = ""
 			app.previewRevealLine = 0
+			if !p.mathRequested && hasMath {
+				p.mathRequested = true
+				go loadPreviewAsset(p.view.Page(), "Math", previewMathLoader)
+			}
 			if !p.mermaidRequested && strings.Contains(body, mermaidBlockStart) {
 				p.mermaidRequested = true
 				go loadPreviewAsset(p.view.Page(), "Mermaid", mermaidLoader)
@@ -744,28 +798,33 @@ var previewStyles = `
 
 var previewPage = previewHTMLShell("Markdown Preview", "", previewContentPolicy, "", 0, "", "")
 
+var workspacePreviewScript = previewScriptWithMath(`
+  function renderMath(preview) {
+    window.renderWorkspacePreviewMath?.(preview);
+  }
+`)
+
 // MyGo installs the preload; the document permits the pinned chart scripts.
 func previewScript() string {
-	return `(() => {` + previewMathScript() + previewMermaidJS + previewVegaJS + previewScrollJS + previewAPIScript + previewSnippetScript + previewCodeScript + `
+	return previewScriptWithMath(previewMathScript())
+}
+
+//go:embed preview_blocks.js
+var previewBlocksScript string
+
+func previewScriptWithMath(math string) string {
+	return `(() => {` + math + previewMermaidJS + previewVegaJS + previewScrollJS + previewAPIScript + previewSnippetScript + previewCodeScript + `
   const chartSelector = diagramSelector + "," + vegaSelector;
   const chartKey = node => node.matches(diagramSelector) ? diagramKey(node) : vegaKey(node);
 
-  function replacePreviewBody(preview, html, reuse) {
-    const existing = preview.querySelectorAll(chartSelector);
-    if (!reuse || !existing.length) {
-      for (const node of existing) releaseVegaChart(node);
-      preview.innerHTML = html;
-      return;
-    }
+  function reusePreviewCharts(existing, incoming) {
     const available = new Map();
     for (const node of existing) {
       const key = chartKey(node);
       if (!available.has(key)) available.set(key, []);
       available.get(key).push(node);
     }
-    const frame = document.createElement("template");
-    frame.innerHTML = html;
-    for (const node of frame.content.querySelectorAll(chartSelector)) {
+    for (const node of incoming.querySelectorAll(chartSelector)) {
       const prior = available.get(chartKey(node))?.shift();
       if (prior) {
         const line = node.getAttribute("data-source-line");
@@ -775,13 +834,30 @@ func previewScript() string {
       }
     }
     for (const nodes of available.values()) for (const node of nodes) releaseVegaChart(node);
-    preview.replaceChildren(frame.content);
   }
 
+` + previewBlocksScript + `
   let revision = 0;
   let documentID = 0;
+  let pendingMath = null;
+  function revealPreview(frame) {
+    if (frame.anchor) document.getElementById(frame.anchor)?.scrollIntoView();
+    if (frame.revealLine > 0) scrollPreview({line: frame.revealLine}, true);
+  }
+
+  window.addEventListener("` + previewMathReadyEvent + `", () => {
+    if (!pendingMath) return;
+    const preview = document.querySelector("main");
+    const {frame, scrollY} = pendingMath;
+    pendingMath = null;
+    if (!preview) return;
+    const samePosition = scrollY === window.scrollY;
+    renderMath(preview);
+    if (samePosition) revealPreview(frame);
+  });
+
   window.mygo.on("` + previewScrollEvent + `", target => {
-    if (target.document === documentID && target.revision === revision) scrollPreview(target);
+    if (target.document === documentID && target.revision === revision) scrollPreview(target, true);
   });
   window.mygo.on("` + previewChangeEvent + `", frame => {
     const preview = document.querySelector("main");
@@ -803,14 +879,17 @@ func previewScript() string {
     else document.documentElement.style.removeProperty("--preview-line-height");
     hideSnippetPreview();
     replacePreviewBody(preview, frame.html, sameDocument && sameTheme && sameStylesheet);
+    invalidatePreviewScrollAnchors();
     renderMath(preview);
     renderDiagrams(preview);
     renderVegaCharts(preview);
     document.title = frame.title;
     preview.setAttribute("aria-label", frame.label || "Markdown Preview");
     window.scrollTo(0, scrollY);
-    if (frame.anchor) document.getElementById(frame.anchor)?.scrollIntoView();
-    if (frame.revealLine > 0) scrollPreview({line: frame.revealLine});
+    revealPreview(frame);
+    pendingMath = frame.math && !window.renderWorkspacePreviewMath
+      ? {frame: {anchor: frame.anchor, revealLine: frame.revealLine}, scrollY: window.scrollY}
+      : null;
     revision = frame.revision;
     documentID = frame.document;
   });

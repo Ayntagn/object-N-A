@@ -2,6 +2,11 @@
   let pauseFraction = null;
   let manualUntil = 0;
   let pointerDown = false;
+  let sourceLineAnchors = null;
+
+  function invalidatePreviewScrollAnchors() {
+    sourceLineAnchors = null;
+  }
 
   function resetPreviewScroll() {
     lastSourceFraction = 0;
@@ -26,17 +31,43 @@
     if (pointerDown || performance.now() < manualUntil) pauseFraction = lastSourceFraction;
   }, { passive: true });
 
-  function scrollPreview(target) {
-    if (target.line > 0) {
-      let nearest = null;
-      let nearestLine = 0;
+  function findPreviewSourceLine(targetLine) {
+    let nearest = null;
+    let nearestLine = 0;
+    for (const block of document.querySelectorAll("[data-source-line]")) {
+      const line = Number.parseInt(block.dataset.sourceLine, 10);
+      if (line > nearestLine && line <= targetLine) {
+        nearest = block;
+        nearestLine = line;
+      }
+    }
+    return nearest;
+  }
+
+  function findCachedPreviewSourceLine(targetLine) {
+    if (sourceLineAnchors === null) {
+      const byLine = new Map();
       for (const block of document.querySelectorAll("[data-source-line]")) {
         const line = Number.parseInt(block.dataset.sourceLine, 10);
-        if (line > nearestLine && line <= target.line) {
-          nearest = block;
-          nearestLine = line;
-        }
+        if (line > 0 && !byLine.has(line)) byLine.set(line, block);
       }
+      sourceLineAnchors = Array.from(byLine).sort((a, b) => a[0] - b[0]);
+    }
+    let low = 0;
+    let high = sourceLineAnchors.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (sourceLineAnchors[mid][0] <= targetLine) low = mid + 1;
+      else high = mid;
+    }
+    return sourceLineAnchors[low - 1]?.[1];
+  }
+
+  function scrollPreview(target, useCachedSourceLines = false) {
+    if (target.line > 0) {
+      const nearest = useCachedSourceLines === true
+        ? findCachedPreviewSourceLine(target.line)
+        : findPreviewSourceLine(target.line);
       nearest?.scrollIntoView({ block: "start", behavior: "instant" });
       return;
     }

@@ -76,7 +76,7 @@ func scanVaultHealth(vault *workspace.Vault) (vaultHealth, error) {
 		if err != nil {
 			continue
 		}
-		graph.add(id, entry.Path, doc.Text)
+		graph.add(id, entry.Path, collectGraphTargets(doc.Text))
 		if scan {
 			notes = append(notes, healthNote{name: title, source: doc.Text})
 			if list, ok := healthAliases(doc.Text); ok {

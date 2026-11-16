@@ -1,11 +1,13 @@
-// spec: FEAT-001 / EV-UI-009 / EV-UI-025 / EV-UI-030 / EV-EDITOR-004
+// spec: FEAT-001 / EV-UI-009 / EV-UI-025 / EV-UI-030 / EV-EDITOR-004 / EV-UI-188
 package vaultindex
 
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"cyberwriter/internal/core/workspace"
 )
@@ -103,6 +105,110 @@ func TestWikilinkTokensKeepSourceByteRanges(t *testing.T) {
 	}
 	if got := source[second.Start:second.End]; got != "[[Another]]" || second.Target != "Another" || second.Label != "Another" || second.Embed {
 		t.Errorf("second token = %+v, source %q", second, got)
+	}
+}
+
+func TestRefreshReadsSameMetadataRewriteAndResolvesNewTarget(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, text string) {
+		t.Helper()
+		filename := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filename, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const changing = "Changing.md"
+	write("Stable.md", "#common with [[Future|a future note]], [[Twin]], and [manual](Manual.pdf)\n")
+	write(changing, "#copper [[Stable]]\n")
+	write("First/Twin.md", "# Twin\n")
+	write("Manual.pdf", "original attachment")
+	filename := filepath.Join(root, changing)
+	timestamp := time.Unix(1700000000, 123456000)
+	if err := os.Chtimes(filename, timestamp, timestamp); err != nil {
+		t.Fatal(err)
+	}
+	vault, err := workspace.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vault.Close()
+	entries, err := vault.SidebarEntries(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := Build(vault, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamped := before.notes[before.byPath["Stable.md"]].stamp != (workspace.IndexedNoteStamp{}) &&
+		before.notes[before.byPath[changing]].stamp != (workspace.IndexedNoteStamp{})
+	noChange, err := before.Refresh(vault, entries)
+	if err != nil || stamped && noChange != before {
+		t.Fatalf("refresh of identical notes = (%p, %v), want %p on files with verified change stamps", noChange, err, before)
+	}
+	info, err := os.Stat(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(changing, "#silver [[Stable]]\n")
+	if err := os.Chtimes(filename, timestamp, timestamp); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := os.Stat(filename)
+	if err != nil || !os.SameFile(info, updated) || !info.ModTime().Equal(updated.ModTime()) || info.Size() != updated.Size() {
+		t.Fatalf("fixture did not preserve file identity, mod time and size: %v", err)
+	}
+	write("Future.md", "# A new target\n")
+	write("Second/Twin.md", "# Duplicate name\n")
+	write("Manual.pdf", "updated attachment")
+	entries, err = vault.SidebarEntries(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := before.Refresh(vault, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cold, err := Build(vault, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := after.Tags(changing); !slices.Equal(got, []string{"silver"}) {
+		t.Errorf("changed tags = %v, want [silver]", got)
+	}
+	if got := entryPaths(after.GraphTagFiles("silver")); !slices.Equal(got, []string{changing}) {
+		t.Errorf("Graph tag files = %v, want [%s]", got, changing)
+	}
+	if got := entryPaths(after.LinksFrom("Stable.md")); !slices.Equal(got, []string{"Future.md"}) {
+		t.Errorf("new target = %v, want [Future.md]", got)
+	}
+	if got := entryPaths(before.LinksFrom("Stable.md")); !slices.Equal(got, []string{"First/Twin.md"}) || !slices.Equal(before.Tags(changing), []string{"copper"}) {
+		t.Errorf("pre-refresh snapshot changed, links = %v, tags = %v", got, before.Tags(changing))
+	}
+	if !reflect.DeepEqual(after.Graph(), cold.Graph()) || !slices.Equal(after.Edges(), cold.Edges()) ||
+		!slices.Equal(after.WikiLinksFrom("Stable.md"), cold.WikiLinksFrom("Stable.md")) {
+		t.Errorf("incremental links or graph differ from a full rebuild")
+	}
+	if _, ok := after.ResolveMarkdown("Stable.md", "Manual.pdf"); ok {
+		t.Error("an updated attachment became a Markdown graph node")
+	}
+	document, err := vault.ReadDocument(changing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := vault.SaveDocument(document, "#golden [[Stable]]\n"); err != nil {
+		t.Fatal(err)
+	}
+	// Save requests an index before the watcher publishes new file entries.
+	saved, err := after.Refresh(vault, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := saved.Tags(changing); !slices.Equal(got, []string{"golden"}) {
+		t.Errorf("saved tags with the previous listing = %v, want [golden]", got)
 	}
 }
 

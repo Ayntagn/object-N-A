@@ -21,8 +21,9 @@ import (
 var ErrChangedOnDisk = errors.New("the note changed on disk. Your edits are still open")
 
 type Vault struct {
-	root   *os.Root
-	writes sync.Mutex
+	root              *os.Root
+	writes            sync.Mutex
+	indexedNoteDevice uint64
 }
 
 type Entry struct {
@@ -62,7 +63,7 @@ func Open(root string) (*Vault, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Vault{root: opened}, nil
+	return &Vault{root: opened, indexedNoteDevice: indexedNoteCacheDevice(opened)}, nil
 }
 
 func (v *Vault) Close() error {
@@ -242,6 +243,10 @@ func readRegularFilePrefix(dir *os.Root, name string, maximum int64) ([]byte, os
 	if err != nil {
 		return nil, nil, err
 	}
+	return readObservedRegularFile(dir, name, info, maximum)
+}
+
+func readObservedRegularFile(dir *os.Root, name string, info os.FileInfo, maximum int64) ([]byte, os.FileInfo, error) {
 	if !info.Mode().IsRegular() {
 		return nil, nil, fmt.Errorf("%q is not a regular file", name)
 	}

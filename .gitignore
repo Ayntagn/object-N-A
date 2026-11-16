@@ -8,4 +8,5 @@
 
 # MyGo sources prepared by cmd/assets
 /third_party/mygo/
+/third_party/mygo-167/
 /third_party/.mygo-*/

@@ -383,7 +383,8 @@ func (w *workspaceWYSIWYG) readOnly(c *mygoui.Context, app *workspaceWindow, pad
 		w.tablePicker(c, app)
 		mygoui.Button(c, "Edit Source").Disabled(app.modalOpen).OnClick(func() { app.setMode(sourceMode) })
 	})
-	if app.previewPane.ready {
+	app.previewPane.init(app)
+	if app.previewPane.ready || app.previewPane.awaitingDOM {
 		mygoui.Column(c).Grow(1).MinHeight(0).FillWidth().Label("WYSIWYG read-only preview").
 			Children(func() { app.previewPane.draw(c, app) })
 		return

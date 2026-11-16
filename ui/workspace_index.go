@@ -24,11 +24,11 @@ type workspaceIndex struct {
 
 func (app *workspaceWindow) requestIndex() {
 	app.index.generation++
-	app.buildIndex()
+	app.buildIndex(app.index.data)
 	app.syncAIVaultContext()
 }
 
-func (app *workspaceWindow) buildIndex() {
+func (app *workspaceWindow) buildIndex(previous *vaultindex.Index) {
 	if app.vault == nil || app.win == nil || app.index.building {
 		return
 	}
@@ -36,14 +36,16 @@ func (app *workspaceWindow) buildIndex() {
 	vault, entries, win := app.vault, app.entries, app.win
 	attachment, generation := app.index.attachment, app.index.generation
 	go func() {
-		index, err := vaultindex.Build(vault, entries)
+		index, err := previous.Refresh(vault, entries)
 		win.Update(func() {
 			if win.IsDestroyed() || app.vault != vault || app.index.attachment != attachment {
 				return
 			}
 			app.index.building = false
 			if app.index.generation != generation {
-				app.buildIndex()
+				// The intermediate result stays private. Its per-file
+				// read stamps can still be reused by the pending scan.
+				app.buildIndex(index)
 				return
 			}
 			if err == nil {

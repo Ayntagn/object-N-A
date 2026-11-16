@@ -23,6 +23,23 @@ var katexCSS string
 //go:embed webassets/katex/fonts/*.woff2
 var katexFonts embed.FS
 
+const previewMathReadyEvent = "cyberwriter:math-ready"
+
+func containsPreviewMath(body string) bool {
+	return strings.Contains(body, `class="math-inline"`) || strings.Contains(body, `class="math-display"`)
+}
+
+func previewMathLoader() (string, error) {
+	return `
+if (typeof window.renderWorkspacePreviewMath !== "function") {
+  (() => {` + previewMathScript() + `
+    window.renderWorkspacePreviewMath = renderMath;
+  })();
+}
+window.dispatchEvent(new Event("` + previewMathReadyEvent + `"));
+return true;`, nil
+}
+
 // A stray dollar can close inside the next code span. Keep the parser's
 // original code boundaries when that happens and escape the false opener in
 // the preview's copy of the source.
@@ -107,6 +124,7 @@ var previewMathScript = sync.OnceValue(func() string {
 	css, _ := json.Marshal(strings.NewReplacer(replacements...).Replace(katexCSS))
 	return `
   let mathReady = false;
+  const renderedMath = new WeakSet();
   function renderMath(preview) {
     const formulas = preview.querySelectorAll(".math-inline, .math-display");
     if (formulas.length === 0) return;
@@ -118,11 +136,13 @@ var previewMathScript = sync.OnceValue(func() string {
       mathReady = true;
     }
     for (const formula of formulas) {
+      if (renderedMath.has(formula)) continue;
       window.katex.render(formula.textContent, formula, {
         displayMode: formula.classList.contains("math-display"),
         throwOnError: false,
         trust: false,
       });
+      renderedMath.add(formula);
     }
   }
 `
