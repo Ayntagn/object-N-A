@@ -6,6 +6,7 @@ import (
 	"log"
 	"path/filepath"
 	"runtime"
+	"slices"
 
 	"cyberwriter/internal/core/workspace"
 	"github.com/egoist/mygo"
@@ -13,11 +14,13 @@ import (
 )
 
 type workspacePDFWindow struct {
-	win        *mygo.Window
-	absolute   string
-	unreadable bool
-	savePrompt bool
-	zoom       func(workspacePDFZoom)
+	win           *mygo.Window
+	absolute      string
+	unreadable    bool
+	savePrompt    bool
+	zoom          func(workspacePDFZoom)
+	requestedPage int
+	jumpToPage    func(int)
 }
 
 type workspacePDFZoom string
@@ -34,7 +37,20 @@ var errUnreadableWorkspacePDF = errors.New("could not read the PDF")
 // EV-UI-177/178. PDFs have their own read-only document window. Opening
 // the same file again raises that window and keeps its scroll position.
 func (app *workspaceWindow) openVaultPDF(relative string) {
-	app.openPDF(filepath.Join(app.root, filepath.FromSlash(relative)), relative, app.vault)
+	app.openVaultPDFAt(app.vault, relative, 0)
+}
+
+// openVaultPDFAt accepts page numbers as written in links, starting from 1.
+// A zero page keeps the reading position when the PDF is already open.
+func (app *workspaceWindow) openVaultPDFAt(vault *workspace.Vault, relative string, page int) {
+	if app.modalOpen || vault == nil || !workspace.IsPDFPath(relative) {
+		return
+	}
+	native, err := filepath.Localize(relative)
+	if err != nil {
+		return
+	}
+	app.openPDF(filepath.Join(vault.RootPath(), native), relative, vault, page)
 }
 
 func (app *workspaceWindow) openPickedPDF(absolute string) {
@@ -43,10 +59,10 @@ func (app *workspaceWindow) openPickedPDF(absolute string) {
 		app.openVaultPDF(relative)
 		return
 	}
-	app.openPDF(absolute, filepath.Base(absolute), nil)
+	app.openPDF(absolute, filepath.Base(absolute), nil, 0)
 }
 
-func (app *workspaceWindow) openPDF(absolute, relative string, vault *workspace.Vault) {
+func (app *workspaceWindow) openPDF(absolute, relative string, vault *workspace.Vault, page int) {
 	a := app.application
 	if current := a.pdfWindows[absolute]; current != nil {
 		if win := current.win; win != nil {
@@ -57,12 +73,13 @@ func (app *workspaceWindow) openPDF(absolute, relative string, vault *workspace.
 				win.Show()
 			}
 		}
+		current.requestPage(page)
 		return
 	}
 	if a.pdfWindows == nil {
 		a.pdfWindows = make(map[string]*workspacePDFWindow)
 	}
-	viewer := &workspacePDFWindow{absolute: absolute}
+	viewer := &workspacePDFWindow{absolute: absolute, requestedPage: page}
 	a.pdfWindows[absolute] = viewer
 	go func() {
 		data, err := readWorkspacePDF(absolute, relative, vault)
@@ -70,7 +87,8 @@ func (app *workspaceWindow) openPDF(absolute, relative string, vault *workspace.
 			if a.pdfWindows[absolute] != viewer {
 				return
 			}
-			if app.win.IsDestroyed() || vault != nil && app.vault != vault {
+			if app.win.IsDestroyed() || vault != nil && app.vault != vault &&
+				!slices.ContainsFunc(app.tabs, func(tab *workspaceTab) bool { return tab.storage == vault }) {
 				delete(a.pdfWindows, absolute)
 				return
 			}
@@ -82,6 +100,16 @@ func (app *workspaceWindow) openPDF(absolute, relative string, vault *workspace.
 			viewer.open(app, data)
 		})
 	}()
+}
+
+func (viewer *workspacePDFWindow) requestPage(page int) {
+	if page <= 0 {
+		return
+	}
+	viewer.requestedPage = page
+	if viewer.jumpToPage != nil {
+		viewer.jumpToPage(page)
+	}
 }
 
 func readWorkspacePDF(absolute, relative string, vault *workspace.Vault) ([]byte, error) {
@@ -155,6 +183,7 @@ func (viewer *workspacePDFWindow) open(origin *workspaceWindow, data []byte) {
 	}
 	win.OnClosed(func() {
 		viewer.zoom = nil
+		viewer.jumpToPage = nil
 		if a.pdfWindows[viewer.absolute] == viewer {
 			delete(a.pdfWindows, viewer.absolute)
 		}

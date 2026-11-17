@@ -37,7 +37,7 @@ func (m *previewMarkup) figureParagraph(in []parser.Inline, anchor string, root 
 		alt := strings.TrimSpace(parser.PlainText(in[start+1 : n.Next]))
 		if root && start == 0 {
 			if transform, _, ok := wysiwyg.ReadBlockImageTransform(m.doc.Source(), in); ok {
-				m.writeTransformedFigure(m.markdownImageSource(n.Dest), alt, n.Title, anchor, transform)
+				m.writeTransformedFigure(m.markdownImageSource(n.Dest), alt, alt, n.Title, anchor, transform)
 				return true
 			}
 		}
@@ -51,6 +51,19 @@ func (m *previewMarkup) figureParagraph(in []parser.Inline, anchor string, root 
 		}
 		m.writeFigure(m.markdownImageSource(n.Dest), alt, n.Title, anchor)
 		return true
+	}
+	if root && start == 0 {
+		if link, transform, _, ok := wysiwyg.ReadWikiBlockImage(m.doc.Source(), in); ok {
+			if src := m.imageSource(link.Target, true); src != "" {
+				alt, caption := path.Base(link.Target), ""
+				width, _ := strconv.Atoi(link.Label)
+				if link.Label != link.Target && width <= 0 {
+					alt, caption = link.Label, link.Label
+				}
+				m.writeTransformedFigure(src, alt, caption, "", anchor, transform)
+				return true
+			}
+		}
 	}
 	if len(in) != 1 || n.Kind != parser.Text || m.resources == nil {
 		return false

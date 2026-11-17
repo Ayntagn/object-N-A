@@ -134,7 +134,7 @@ func (app *workspaceWindow) folderRow(c *mygoui.Context, tree mygoui.TreeParts, 
 	if len(entry.Children) == 0 {
 		group = mygoui.Element{}
 	}
-	app.vaultTreeDragRow(c, row, group, entry.Path, inset)
+	app.vaultTreeDragRow(c, row, group, entry, inset)
 }
 
 func (app *workspaceWindow) drawVaultFolderTitle(c *mygoui.Context, name, count string, open bool, colors vaultSectionColors) {

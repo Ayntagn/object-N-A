@@ -4,11 +4,13 @@ import (
 	"log"
 	"net/url"
 	"strings"
+	"unicode"
 
 	"cyberwriter/internal/core/workspace"
 	"cyberwriter/ui/wysiwyg"
 	"github.com/egoist/mygo"
 	mygoui "github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown"
 	"github.com/egoist/mygo/ui/richtext"
 )
@@ -222,18 +224,25 @@ func (w *workspaceWYSIWYG) visualSurface(c *mygoui.Context, app *workspaceWindow
 		w.math.relayout(c)
 	}
 	font := mygoui.Font{Family: c.Theme().Font, Size: float32(w.fontSize())}
+	services := c.Services()
 	edit := richtext.Editor(c.Key("visual-editor"), document, richtext.EditorOptions{
 		Label: "WYSIWYG editor", Font: font,
 		Theme: theme, ReadOnly: app.modalOpen || streaming,
-		OnLink:        func(target string) { w.followLink(app, target) },
-		OnLinkCommand: func() { w.format(app, linkFormat) },
-		TagStyle:      w.visualTagStyle,
+		TransformInput: visualMixedLanguageInput,
+		OnPaste:        func(start, end int) bool { return w.pasteVisualImage(app, services, start, end) },
+		OnLink:         func(target string) { w.followLink(app, target) },
+		OnLinkCommand:  func() { w.format(app, linkFormat) },
+		TagStyle:       w.visualTagStyle,
 	}).Grow(1).MinHeight(0).FillWidth().Radius(0).Border(0, c.Theme().Border).
 		Background(mygoui.Transparent).OnShortcut(mygoui.Cmd, mygoui.KeyBackquote, func() { w.format(app, inlineCodeFormat) })
 	edit.ContextMenu(func(m *mygoui.Menu) {
 		m.EditItems()
 		app.snippetCaptureMenu(m)
 	})
+	if !streaming && w.editable(app) && !app.inspection &&
+		(app.document.Path == "" || workspace.IsMarkdownPath(app.document.Path)) {
+		w.dropInVisualNote(app, edit)
+	}
 	if w.focus && !app.modalOpen {
 		edit.Focus()
 		w.focus = false
@@ -246,7 +255,7 @@ func (w *workspaceWYSIWYG) visualSurface(c *mygoui.Context, app *workspaceWindow
 	viewport := edit.Bounds()
 	viewportWidth := viewport.W
 	boxes := document.VisibleParagraphs()
-	w.drawCallouts(c, viewport, padding, text, boxes)
+	w.drawCallouts(c, viewport, padding, text, boxes, app.calloutStyles())
 	w.drawFindMarks(c, app, text, boxes, viewportWidth, theme, font)
 	x, y, over := edit.PointerPosition()
 	pointer := mygoui.Point{X: x, Y: y}
@@ -356,6 +365,41 @@ func (w *workspaceWYSIWYG) visualSurface(c *mygoui.Context, app *workspaceWindow
 	}
 }
 
+func visualMixedLanguageInput(text richtext.Text, start, end int, attributes richtext.Attributes, input string) (string, int) {
+	if attributes.Code || attributes.Link != "" || attributes.Attachment != nil || attributes.Tag == wysiwyg.FormulaColorTag {
+		return input, 0
+	}
+	var left rune
+	for at := start - 1; at >= 0; at-- {
+		r := text.RuneAt(at)
+		if !unicode.IsMark(r) {
+			left = r
+			break
+		}
+	}
+	replacement, trailing := spaceMixedLanguage(left, input, text.RuneAt(end))
+	if replacement == input || text.ParagraphStyleAt(start).CodeBlock {
+		return input, 0
+	}
+	paragraphStart, paragraphEnd := text.ParagraphRange(start)
+	if end > paragraphEnd {
+		return input, 0
+	}
+	// Typing a literal delimiter can start a formula or code span before
+	// RichText assigns attributes to it. Check the unfinished source too.
+	before := text.Slice(paragraphStart, start).String()
+	after := text.Slice(end, paragraphEnd).String()
+	line := before + input + after
+	if strings.ContainsAny(line, "`~$\\[#:<") || strings.Contains(line, "www.") {
+		snapshot := editor.NewBuffer(before + after).Snapshot()
+		replacement, trailing = mixedLanguageInsertion(snapshot, len(before), len(before), input)
+	}
+	if trailing {
+		return replacement, 1
+	}
+	return replacement, 0
+}
+
 func (w *workspaceWYSIWYG) completeVisualCodeFence(app *workspaceWindow) {
 	if !w.editable(app) {
 		return
@@ -390,6 +434,7 @@ func (w *workspaceWYSIWYG) readOnly(c *mygoui.Context, app *workspaceWindow, pad
 		return
 	}
 	theme := &markdown.Theme{FontSize: float32(w.fontSize())}
+	app.resolvePreviewTheme(systemPreviewThemeID).colorPreviewEmphasis(c, theme)
 	for level, size := range wysHeadingSizes {
 		theme.Headings[level].Size = size
 	}
@@ -528,6 +573,14 @@ func (w *workspaceWYSIWYG) followLink(app *workspaceWindow, address string) {
 	}
 	if target, ok := w.session.WikilinkTarget(address); ok {
 		origin := app.previewOrigin()
+		if name, _, _ := strings.Cut(target, "#"); workspace.IsPDFPath(strings.TrimSpace(name)) {
+			if relative, page, resolved := origin.resolveWikiPDF(target); resolved {
+				app.openVaultPDFAt(origin.vault, relative, page)
+			} else {
+				app.problem = app.tr("Could not open the linked PDF.", "无法打开链接中的 PDF。")
+			}
+			return
+		}
 		if origin.index != nil {
 			if relative, resolved := origin.index.Resolve(origin.note, target); resolved {
 				_, section, _ := strings.Cut(target, "#")

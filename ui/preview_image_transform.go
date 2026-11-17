@@ -13,11 +13,11 @@ import (
 	"cyberwriter/ui/wysiwyg"
 )
 
-func (m *previewMarkup) writeTransformedFigure(src, alt, title, anchor string, transform wysiwyg.ImageTransform) {
+func (m *previewMarkup) writeTransformedFigure(src, alt, caption, title, anchor string, transform wysiwyg.ImageTransform) {
 	naturalW, naturalH, ok := previewImageDimensions(src)
 	if !ok {
-		if alt != "" {
-			m.writeFigure(src, alt, title, anchor)
+		if caption != "" {
+			m.writeCaptionedFigure(src, alt, caption, title, anchor)
 		} else {
 			if src == "" {
 				src = "data:,"
@@ -47,8 +47,8 @@ func (m *previewMarkup) writeTransformedFigure(src, alt, title, anchor string, t
 		fmt.Fprintf(&m.out, ` title="%s"`, html.EscapeString(title))
 	}
 	m.out.WriteString("></span>")
-	if alt != "" {
-		label, caption := exportdoc.FigureCaption(alt, m.figures.numbered, &m.figures.counter)
+	if caption != "" {
+		label, caption := exportdoc.FigureCaption(caption, m.figures.numbered, &m.figures.counter)
 		m.out.WriteString("<figcaption>")
 		if label != "" {
 			fmt.Fprintf(&m.out, `<span class="figure-label">%s</span> `, label)

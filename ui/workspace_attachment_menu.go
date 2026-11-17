@@ -132,11 +132,13 @@ func (app *workspaceWindow) moveAttachment(from, to string, expected fs.FileInfo
 				}
 				_ = owner.closeUnusedVault(old)
 			}
-			if tab == owner.workspaceTab {
-				owner.win.SetTitle(tab.title())
-				owner.win.SetRepresentedFile(owner.absoluteDocument(tab))
+			if win := owner.win; win != nil {
+				if tab == owner.workspaceTab {
+					win.SetTitle(tab.title())
+					win.SetRepresentedFile(owner.absoluteDocument(tab))
+				}
+				win.Invalidate()
 			}
-			owner.win.Invalidate()
 		}
 		if owner.root == app.root {
 			for i, recent := range owner.recentPaths {
@@ -154,7 +156,9 @@ func (app *workspaceWindow) moveAttachment(from, to string, expected fs.FileInfo
 	if workspace.CanBrowseVaultVersions(from) {
 		app.moveVersionHistory(from, to)
 	}
-	app.persistSession()
+	if app.win != nil {
+		app.persistSession()
+	}
 	return nil
 }
 
@@ -206,7 +210,11 @@ func (app *workspaceWindow) refreshAttachmentRows() {
 	app.refreshVault()
 	for _, owner := range app.documentWindows() {
 		if owner != app && owner.vault == app.vault {
-			owner.win.Update(owner.refreshVault)
+			if owner.win != nil {
+				owner.win.Update(owner.refreshVault)
+			} else {
+				owner.refreshVault()
+			}
 		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"cyberwriter/internal/core/callout"
 	"cyberwriter/internal/core/mdshortcuts"
 	"cyberwriter/internal/core/vaultcontext"
 	"cyberwriter/internal/core/workspace"
@@ -19,6 +20,7 @@ type workspacePreferences struct {
 	InterfaceLanguage           workspaceLanguage           `json:"interfaceLanguage,omitempty"`
 	Appearance                  workspaceAppearance         `json:"appAppearance"`
 	PreviewThemeID              string                      `json:"selectedThemeId"`
+	CalloutStyles               []callout.Style             `json:"calloutStyles,omitempty"`
 	UserStylesheetEnabled       bool                        `json:"userStylesheetEnabled,omitempty"`
 	LineNumbers                 bool                        `json:"lineNumbers"`
 	TypewriterMode              bool                        `json:"typewriterMode"`
@@ -165,6 +167,13 @@ func loadWorkspacePreferences() (workspacePreferences, error) {
 		preferences.Appearance = defaults.Appearance
 	}
 	preferences.PreviewThemeID = normalizedPreviewThemeID(preferences.PreviewThemeID)
+	styles := preferences.CalloutStyles[:0]
+	for _, row := range preferences.CalloutStyles {
+		if style, err := callout.Normalize(row); err == nil {
+			styles = upsertCalloutStyle(styles, style)
+		}
+	}
+	preferences.CalloutStyles = styles
 	if preferences.DefaultView < sourceMode || preferences.DefaultView > previewMode {
 		preferences.DefaultView = splitMode
 	}

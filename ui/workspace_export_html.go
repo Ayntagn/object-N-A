@@ -56,6 +56,7 @@ func renderStandaloneHTML(doc exportDocument, mode standaloneHTMLMode, figureCou
 			charts: true, figures: &figures, standalone: mode, codeTheme: previewCodeTheme(theme.dark()),
 			htmlBlocks:    doc.kind == documentMarkdown || doc.kind == documentUndetermined,
 			liveAPIFences: doc.kind == documentMarkdown || doc.kind == documentUndetermined,
+			calloutStyles: doc.calloutStyles(),
 		}
 		body, name = markup.render(doc.source, name, true)
 		body = markup.fillWikiFigures(body)
@@ -133,7 +134,7 @@ html[data-preview-theme] code, html[data-preview-theme] pre {
 .embed-note { border-inline-start: 3px solid var(--doc-link); padding: 8px 12px; margin: 8px 0; opacity: .85; }
 .embed-note > header { font-size: .75em; opacity: .5; margin-bottom: 4px; }
 figure.md-figure { break-inside: avoid; }
-` + previewMermaidCSS + previewVegaCSS + previewAPICSS + sourceFilePreviewCSS
+` + previewMermaidCSS + previewVegaCSS + previewAPICSS + previewCalloutCSS + sourceFilePreviewCSS
 
 const responsiveExportCSS = `
 body { max-width: 800px; margin-inline: auto; padding: 24px; }

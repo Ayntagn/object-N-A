@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"cyberwriter/internal/core/vaultindex"
+	"cyberwriter/internal/core/workspace"
 	"github.com/egoist/mygo/ui/markdown/parser"
 	"github.com/egoist/mygo/ui/richtext"
 )
@@ -14,10 +15,14 @@ var wikiLabelEscapes = strings.NewReplacer(
 	"~", "\\~", "<", "\\<", "&", "\\&",
 )
 
-// Project simple Wikilinks as MyGo links. An address belongs to one occurrence
-// so adjacent references remain separate runs even when their targets match.
-func projectWithWikilinks(parsed *parser.Document, source string, formulas map[string]*Formula, images map[string]*Image) (richtext.Text, string, map[string]string, bool) {
-	var links map[string]string
+type visualWikilink struct {
+	target, label, token string
+}
+
+// Project simple Wikilinks and aliased PDF references as MyGo links. Each
+// occurrence has its own address so adjacent references remain separate runs.
+func projectWithWikilinks(parsed *parser.Document, source string, formulas map[string]*Formula, images map[string]*Image, calloutBody bool) (richtext.Text, string, map[string]visualWikilink, bool) {
+	var links map[string]visualWikilink
 	var projected strings.Builder
 	start := 0
 	for block := 1; block < parsed.Len(); block++ {
@@ -33,16 +38,18 @@ func projectWithWikilinks(parsed *parser.Document, source string, formulas map[s
 			}
 			raw := source[inline.Start:inline.End]
 			for _, link := range vaultindex.Wikilinks(raw) {
-				if link.Embed || raw[link.Start:link.End] != "[["+link.Target+"]]" {
+				token := raw[link.Start:link.End]
+				name, _, _ := strings.Cut(link.Target, "#")
+				if link.Embed || token != "[["+link.Target+"]]" && !workspace.IsPDFPath(strings.TrimSpace(name)) {
 					continue
 				}
 				address := "cyberwriter-wikilink:" + rand.Text()
 				if links == nil {
-					links = make(map[string]string)
+					links = make(map[string]visualWikilink)
 				}
-				links[address] = link.Target
+				links[address] = visualWikilink{target: link.Target, label: link.Label, token: token}
 				projected.WriteString(source[start : inline.Start+link.Start])
-				projected.WriteString("[" + wikiLabelEscapes.Replace(link.Target) + "](" + address + ")")
+				projected.WriteString("[" + wikiLabelEscapes.Replace(link.Label) + "](" + address + ")")
 				start = inline.Start + link.End
 			}
 		}
@@ -53,17 +60,17 @@ func projectWithWikilinks(parsed *parser.Document, source string, formulas map[s
 		parsed = parser.New(Extensions)
 		parsed.Set(source)
 	}
-	text, markdown, ok := projectMarkdown(parsed, source, formulas, images)
+	text, markdown, ok := projectMarkdown(parsed, source, formulas, images, calloutBody)
 	return text, markdown, links, ok
 }
 
 // WikilinkTarget resolves an address created by this visual session.
 func (s *Session) WikilinkTarget(address string) (string, bool) {
-	target, ok := s.wikilinks[address]
-	return target, ok
+	link, ok := s.wikilinks[address]
+	return link.target, ok
 }
 
-func restoreWikilinks(source string, links map[string]string) string {
+func restoreWikilinks(source string, links map[string]visualWikilink) string {
 	if len(links) == 0 || !strings.Contains(source, "cyberwriter-wikilink:") {
 		return source
 	}
@@ -74,20 +81,22 @@ func restoreWikilinks(source string, links map[string]string) string {
 	for block := 1; block < parsed.Len(); block++ {
 		inlines := parsed.Inlines(block)
 		for index, inline := range inlines {
-			target, ok := links[inline.Dest]
+			link, ok := links[inline.Dest]
 			if inline.Kind != parser.Link || !ok || inline.Start < start {
 				continue
 			}
 			label := inlines[index+1 : inline.Next]
 			restored.WriteString(source[start:inline.Start])
-			restored.WriteString("[[" + target)
-			if len(label) != 1 || label[0].Kind != parser.Text || label[0].Text != target {
+			if len(label) == 1 && label[0].Kind == parser.Text && label[0].Text == link.label {
+				restored.WriteString(link.token)
+			} else {
+				restored.WriteString("[[" + link.target)
 				raw := source[inline.Start:inline.End]
 				if end := strings.LastIndex(raw, "]("); end > 0 {
 					restored.WriteString("|" + raw[1:end])
 				}
+				restored.WriteString("]]")
 			}
-			restored.WriteString("]]")
 			start = inline.End
 		}
 	}

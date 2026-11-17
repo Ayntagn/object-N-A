@@ -17,6 +17,9 @@ type visualImageEditor struct {
 func transformedVisualImageSize(picture *wysiwyg.Image, naturalW, naturalH, available float32,
 	drag visualImageResize) (base, maxHeight, width, height float32) {
 	transform := picture.ImageTransform
+	if picture.WikiWidth > 0 && !picture.HasTransform() {
+		transform.Ratio = float64(picture.WikiWidth) / float64(naturalW)
+	}
 	base = naturalH
 	if transform.SwapsAxes() {
 		base = naturalW

@@ -13,67 +13,73 @@ import (
 
 const paragraphIndent = "\u3000\u3000"
 
-func (app *workspaceWindow) autoIndentSourceParagraph(event mygoui.InputEvent) bool {
-	if event.Kind != mygoui.InputText || !app.sourceParagraphIndentEnabled() || !canStartIndentedParagraph(event.Text) {
+func (app *workspaceWindow) typeSourceMarkdown(text string) bool {
+	selections := app.code.Selections()
+	if len(selections) != 1 {
 		return false
 	}
-	snapshot, caret, emptyLine := sourceParagraphCaret(app.code)
-	if !emptyLine || !startsSourceParagraph(snapshot.String(), caret, event.Text) {
+	sel := selections[0]
+	replacement, caret := app.sourceMarkdownInsertion(app.draft.Snapshot(), sel.Start(), sel.End(), text)
+	if replacement == text {
 		return false
 	}
-	// Insert the prefix and the first input as one undo step.
-	app.code.Insert(paragraphIndent + event.Text)
+	app.code.ReplaceTextInput(nil, replacement, caret)
 	return true
 }
 
-func (app *workspaceWindow) sourceParagraphIndentEnabled() bool {
-	return app.preferences != nil && app.preferences.AutoIndentParagraphs && app.sourceEditing() && app.draft != nil &&
+func (app *workspaceWindow) sourceMarkdownTyping() bool {
+	return app.sourceEditing() && app.draft != nil && !app.inspection &&
 		(app.document.Path == "" || workspace.IsMarkdownPath(app.document.Path)) &&
 		(app.markdownShortcutSession.code != app.code || app.markdownShortcutSession.stopMax <= 0)
 }
 
-func sourceParagraphCaret(code *editor.State) (editor.Snapshot, int, bool) {
-	selections := code.Selections()
-	if len(selections) != 1 || selections[0].Start() != selections[0].End() {
-		return editor.Snapshot{}, 0, false
+func (app *workspaceWindow) sourceMarkdownInsertion(snapshot editor.Snapshot, start, end int, text string) (string, int) {
+	replacement, trailingSpace := mixedLanguageInsertion(snapshot, start, end, text)
+	if app.preferences != nil && app.preferences.AutoIndentParagraphs && start == end && canStartIndentedParagraph(text) {
+		line := snapshot.LineOf(start)
+		if start == snapshot.LineStart(line) && start == snapshot.LineEnd(line) && startsSourceParagraph(snapshot.String(), start, text) {
+			replacement = paragraphIndent + replacement
+		}
 	}
-	caret := selections[0].Head
-	snapshot := code.Buffer.Snapshot()
-	line := snapshot.LineOf(caret)
-	return snapshot, caret, caret == snapshot.LineStart(line) && caret == snapshot.LineEnd(line)
+	caret := len(replacement)
+	if trailingSpace {
+		caret--
+	}
+	return replacement, caret
 }
 
-// Snapshot the empty line before preedit changes the buffer and selection.
-type sourceParagraphComposition struct {
-	before  editor.Snapshot
-	at      int
-	version uint64
-	mark    mygoui.TextInputRange
+// Keep the original selection and context while the IME updates its preedit.
+type sourceMarkdownComposition struct {
+	before     editor.Snapshot
+	start, end int
+	version    uint64
+	mark       mygoui.TextInputRange
 }
 
-type sourceParagraphTextInput struct {
+type sourceMarkdownTextInput struct {
 	mygoui.TextInputClient
 	app     *workspaceWindow
 	code    *editor.State
-	pending *sourceParagraphComposition
+	pending *sourceMarkdownComposition
 }
 
-func (input *sourceParagraphTextInput) wrap(client mygoui.TextInputClient) mygoui.TextInputClient {
+func (input *sourceMarkdownTextInput) wrap(client mygoui.TextInputClient) mygoui.TextInputClient {
 	input.TextInputClient = client
 	return input
 }
 
-func (input *sourceParagraphTextInput) enabled() bool {
-	return input.app.code == input.code && input.app.sourceParagraphIndentEnabled()
+func (input *sourceMarkdownTextInput) enabled() bool {
+	return input.app.code == input.code && input.app.sourceMarkdownTyping()
 }
 
-func (input *sourceParagraphTextInput) SetMarkedText(r *mygoui.TextInputRange, text string, selected mygoui.TextInputRange) {
+func (input *sourceMarkdownTextInput) SetMarkedText(r *mygoui.TextInputRange, text string, selected mygoui.TextInputRange) {
 	_, marked := input.MarkedRange()
 	if !marked {
 		input.pending = nil
 		if text != "" && input.enabled() && (r == nil || *r == input.Selection().Range) {
-			if before, at, emptyLine := sourceParagraphCaret(input.code); emptyLine {
-				input.pending = &sourceParagraphComposition{before: before, at: at, version: before.Version()}
+			if selections := input.code.Selections(); len(selections) == 1 {
+				before := input.code.Buffer.Snapshot()
+				input.pending = &sourceMarkdownComposition{before: before, start: selections[0].Start(), end: selections[0].End(), version: before.Version()}
 			}
 		}
 	} else if p := input.pending; p != nil && !input.matches(p, r, true) {
@@ -89,21 +95,23 @@ func (input *sourceParagraphTextInput) SetMarkedText(r *mygoui.TextInputRange, t
 	}
 }
 
-func (input *sourceParagraphTextInput) ReplaceText(r *mygoui.TextInputRange, text string) {
+func (input *sourceMarkdownTextInput) ReplaceText(r *mygoui.TextInputRange, text string) {
 	p := input.pending
 	input.pending = nil
-	if p != nil && input.enabled() && canStartIndentedParagraph(text) {
+	if p != nil && input.enabled() {
 		_, marked := input.MarkedRange()
-		if input.matches(p, r, marked) && startsSourceParagraph(p.before.String(), p.at, text) {
-			// Let MyGo replace the marked text, move the caret and commit
-			// the composition and the prefix in its existing undo group.
-			text = paragraphIndent + text
+		if input.matches(p, r, marked) {
+			replacement, caret := input.app.sourceMarkdownInsertion(p.before, p.start, p.end, text)
+			if replacement != text {
+				input.code.ReplaceTextInput(r, replacement, caret)
+				return
+			}
 		}
 	}
 	input.TextInputClient.ReplaceText(r, text)
 }
 
-func (input *sourceParagraphTextInput) matches(p *sourceParagraphComposition, r *mygoui.TextInputRange, marked bool) bool {
+func (input *sourceMarkdownTextInput) matches(p *sourceMarkdownComposition, r *mygoui.TextInputRange, marked bool) bool {
 	if input.code.Buffer.Version() != p.version {
 		return false
 	}

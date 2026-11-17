@@ -495,11 +495,29 @@ func (app *workspaceWindow) chooseMoveFolder(relative string) {
 				}
 				return
 			}
-			if err := app.moveNote(relative, target); err != nil {
+			if err := app.moveVaultFileToFolder(relative, folder); err != nil {
 				app.problem = fmt.Sprintf("Could not move %q. %v", relative, err)
 			}
 		})
 	}()
+}
+
+func (app *workspaceWindow) moveVaultFileToFolder(relative, folder string) error {
+	if !fs.ValidPath(folder) {
+		return fmt.Errorf("invalid Vault folder %q", folder)
+	}
+	if path.Dir(relative) == folder {
+		return nil
+	}
+	selected, err := app.vault.StatEntry(relative)
+	if err != nil {
+		return err
+	}
+	if err := app.moveAttachment(relative, path.Join(folder, path.Base(relative)), selected); err != nil {
+		return err
+	}
+	app.revealFolder(folder)
+	return nil
 }
 
 func (app *workspaceWindow) moveNote(from, to string) error {

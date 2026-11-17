@@ -87,6 +87,7 @@ type workspaceWindow struct {
 	multiFile               workspaceMultiFile
 	previewZoom             int
 	previewPane             workspacePreview
+	noteDropDownload        func(context.Context, string) ([]byte, error)
 	pdfPreview              workspacePDFPreview
 	snippets                workspaceSnippets
 	markdownShortcutSession markdownShortcutSession

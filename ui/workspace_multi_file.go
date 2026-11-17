@@ -230,12 +230,6 @@ func (app *workspaceWindow) drawMultiFileVisualEditor(c *mygoui.Context) {
 	w.editor(c, app, 16)
 }
 
-type multiFileMarkdownState struct {
-	vault   *workspace.Vault
-	path    string
-	options *markdown.Options
-}
-
 func (app *workspaceWindow) drawMultiFileMarkdown(c *mygoui.Context, tab *workspaceTab) {
 	scroll := mygoui.Scroll(c.Key("multi-file Markdown")).Grow(1).MinWidth(0).MinHeight(0).
 		Label("Rendered — "+tab.title()).Padding(12, 16).Focusable().IgnoreInput(app.modalOpen)
@@ -243,28 +237,16 @@ func (app *workspaceWindow) drawMultiFileMarkdown(c *mygoui.Context, tab *worksp
 		scroll.Focus()
 		app.multiFile.focusReader = false
 	}
-	state := mygoui.Local(scroll, "multi-file Markdown assets", func() multiFileMarkdownState { return multiFileMarkdownState{} })
-	vault, note := app.vault, tab.document.Path
-	if tab.storage != nil {
-		vault = tab.storage
-	}
-	if state.options == nil || state.vault != vault || state.path != note {
-		*state = multiFileMarkdownState{vault: vault, path: note, options: withMarkdownCodeBadges(&markdown.Options{
+	state := mygoui.Local(scroll, "multi-file Markdown assets", func() nativeMarkdownImageState { return nativeMarkdownImageState{} })
+	origin := app.tabPreviewOrigin(tab)
+	origin.index = nil
+	if state.options == nil || state.origin != origin {
+		*state = nativeMarkdownImageState{origin: origin, options: app.withNativeMarkdownCallouts(withMarkdownCodeBadges(&markdown.Options{
 			Extensions: wysiwyg.Extensions, WrapCode: true,
-		})}
+		}))}
 		state.options.OnLink = func(dest string) { app.openMultiFileLink(tab, dest) }
-		if vault != nil && note != "" {
-			state.options.LoadImage = func(dest string) (mygoui.ImageSource, error) {
-				relative, ok := workspace.ResolveImagePath(note, dest)
-				if !ok {
-					return nil, fs.ErrNotExist
-				}
-				data, _, err := vault.ReadPreviewImage(relative, 4<<20)
-				if err != nil {
-					return nil, err
-				}
-				return mygoui.DecodeBitmap(data)
-			}
+		if origin.vault != nil && origin.note != "" {
+			state.options.LoadImage = origin.loadMarkdownImage
 		}
 	}
 	source := tab.draft.String()
@@ -273,6 +255,7 @@ func (app *workspaceWindow) drawMultiFileMarkdown(c *mygoui.Context, tab *worksp
 	if !c.Preferences().HighContrast {
 		scroll.Background(mygoui.Hex(theme.BackgroundColor))
 		state.options.Theme = theme.markdownTheme(100, previewLineSpacing(source, app.preferences.Export.spacing()))
+		theme.colorPreviewEmphasis(c, state.options.Theme)
 		state.options.Theme.CodeColors = previewCodeTheme(theme.dark())
 	} else {
 		state.options.Theme = &markdown.Theme{}
@@ -284,6 +267,9 @@ func (app *workspaceWindow) drawMultiFileMarkdown(c *mygoui.Context, tab *worksp
 		tab.previewAnchor = ""
 	}
 	_, _, body := workspace.SplitFrontmatter(source)
+	if state.options.LoadImage != nil {
+		body = nativeWikiAssets(scroll, body, state.options.Extensions, origin)
+	}
 	focused := mygoui.Local(scroll, "multi-file reader focused", func() bool { return false })
 	if within := scroll.FocusWithin(); within != *focused {
 		*focused = within
@@ -301,8 +287,15 @@ func (app *workspaceWindow) drawMultiFileMarkdown(c *mygoui.Context, tab *worksp
 }
 
 func (app *workspaceWindow) openMultiFileLink(tab *workspaceTab, destination string) {
+	if app.modalOpen || !app.multiFile.active {
+		return
+	}
+	if relative, page, ok := previewPDFNavigation(destination); ok {
+		app.openVaultPDFAt(app.tabPreviewOrigin(tab).vault, relative, page)
+		return
+	}
 	link, err := url.Parse(destination)
-	if err != nil || app.modalOpen || !app.multiFile.active {
+	if err != nil {
 		return
 	}
 	if link.Scheme != "" || link.Host != "" {

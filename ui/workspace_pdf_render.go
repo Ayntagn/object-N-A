@@ -96,13 +96,14 @@ func renderPDFHTMLWithFigures(doc exportDocument, counter *int) (document, body 
 		figures.counter = *counter
 	}
 	markup := previewMarkup{doc: parser.New(webPreviewExtensions), resources: doc.origin.resources(), relative: doc.origin.note,
-		charts: true, figures: &figures, codeTheme: codeTheme, liveAPIFences: doc.kind == documentMarkdown || doc.kind == documentUndetermined}
+		charts: true, figures: &figures, codeTheme: codeTheme, liveAPIFences: doc.kind == documentMarkdown || doc.kind == documentUndetermined,
+		calloutStyles: doc.calloutStyles()}
 	body, title := markup.render(doc.source, doc.name, false)
 	if counter != nil {
 		*counter = figures.counter
 	}
 	policy := strings.Replace(previewContentPolicy, "script-src ", "script-src '"+pdfPaperScriptHash+"' ", 1)
-	css := previewMermaidCSS + previewVegaCSS + previewAPICSS
+	css := previewMermaidCSS + previewVegaCSS + previewAPICSS + previewCalloutCSS
 	if runtime.GOOS == "darwin" {
 		css += pdfQuartzTextCSS
 	}

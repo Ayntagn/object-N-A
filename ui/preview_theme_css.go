@@ -53,9 +53,25 @@ var documentPreviewPalettes = func() string {
 	var styles strings.Builder
 	for _, theme := range previewThemes {
 		styles.WriteString(theme.cssVariables())
+		italic, bold := theme.emphasisColors()
+		fmt.Fprintf(&styles, "html[data-preview-theme=%q] { --preview-italic: %s; --preview-bold: %s; }\n", theme.ID, italic, bold)
 	}
 	return styles.String()
 }()
+
+func (theme documentPreviewTheme) emphasisColors() (italic, bold string) {
+	if theme.dark() {
+		return "#c8a4f0", "#f5c277"
+	}
+	return "#694096", "#8c4b08"
+}
+
+const documentPreviewEmphasis = `
+  main[data-color-emphasis] em { color: var(--preview-italic); }
+  main[data-color-emphasis] strong { color: var(--preview-bold); }
+  main[data-color-emphasis] strong em,
+  main[data-color-emphasis] :is(a, code, pre) :is(em, strong) { color: inherit; }
+`
 
 func (theme documentPreviewTheme) cssVariables() string {
 	scheme := "light"

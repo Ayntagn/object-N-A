@@ -46,13 +46,13 @@ func (s *Session) InsertPageBreak() {
 	})
 }
 
-func (s *Session) projectMarkdown(doc *parser.Document, source string) (richtext.Text, string, map[string]string, bool) {
+func (s *Session) projectMarkdown(doc *parser.Document, source string) (richtext.Text, string, map[string]visualWikilink, bool) {
 	return s.projectVisualMarkdown(doc, source, true)
 }
 
-func (s *Session) projectVisualMarkdown(doc *parser.Document, source string, withCallouts bool) (richtext.Text, string, map[string]string, bool) {
+func (s *Session) projectVisualMarkdown(doc *parser.Document, source string, withCallouts bool) (richtext.Text, string, map[string]visualWikilink, bool) {
 	var callouts map[string][]richtext.Paragraph
-	var calloutLinks map[string]string
+	var calloutLinks map[string]visualWikilink
 	if withCallouts {
 		var ok bool
 		source, callouts, calloutLinks, ok = s.projectCallouts(doc, source)
@@ -91,9 +91,9 @@ func (s *Session) projectVisualMarkdown(doc *parser.Document, source string, wit
 		doc.Set(source)
 	}
 	if start == 0 && len(blocks) == 0 && len(formulas) == 0 && len(images) == 0 && len(callouts) == 0 {
-		return projectWithWikilinks(doc, source, nil, nil)
+		return projectWithWikilinks(doc, source, nil, nil, !withCallouts)
 	}
-	text, _, links, ok := projectWithWikilinks(doc, source, formulas, images)
+	text, _, links, ok := projectWithWikilinks(doc, source, formulas, images, !withCallouts)
 	if !ok {
 		return richtext.Text{}, "", nil, false
 	}

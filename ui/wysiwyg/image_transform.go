@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 
+	"cyberwriter/internal/core/vaultindex"
+	"cyberwriter/internal/core/workspace"
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
@@ -72,6 +74,32 @@ func ReadBlockImageTransform(source string, in []parser.Inline) (ImageTransform,
 	}
 	t, ok := parseImageTransform(comment.Text)
 	return t, comment.End, ok
+}
+
+// ReadWikiBlockImage reads a standalone bitmap embed with a trailing image
+// transform comment. Link offsets and the returned end index refer to source.
+func ReadWikiBlockImage(source string, in []parser.Inline) (vaultindex.Wikilink, ImageTransform, int, bool) {
+	if len(in) != 2 || in[0].Kind != parser.Text || in[1].Kind != parser.HTML {
+		return vaultindex.Wikilink{}, ImageTransform{}, 0, false
+	}
+	text, comment := in[0], in[1]
+	transform, ok := parseImageTransform(comment.Text)
+	if !ok {
+		return vaultindex.Wikilink{}, ImageTransform{}, 0, false
+	}
+	raw := source[text.Start:comment.Start]
+	links := vaultindex.Wikilinks(raw)
+	if len(links) != 1 {
+		return vaultindex.Wikilink{}, ImageTransform{}, 0, false
+	}
+	link := links[0]
+	if !link.Embed || !workspace.IsRasterImagePath(link.Target) ||
+		strings.Trim(raw[:link.Start], " \t") != "" || strings.Trim(raw[link.End:], " \t") != "" {
+		return vaultindex.Wikilink{}, ImageTransform{}, 0, false
+	}
+	link.Start += text.Start
+	link.End += text.Start
+	return link, transform, comment.End, true
 }
 
 func parseImageTransform(text string) (ImageTransform, bool) {

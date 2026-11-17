@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"cyberwriter/internal/core/callout"
 	"cyberwriter/internal/core/markdownhighlight"
 	"cyberwriter/internal/core/mermaid"
 	"cyberwriter/internal/core/vaultindex"
@@ -41,6 +42,7 @@ type previewFrame struct {
 	Theme         string  `json:"theme"`
 	ThemeFonts    string  `json:"themeFonts,omitempty"`
 	CustomCSS     string  `json:"customCSS,omitempty"`
+	ColorEmphasis bool    `json:"colorEmphasis,omitempty"`
 	LineSpacing   float64 `json:"lineSpacing"`
 	ScrollPastEnd bool    `json:"scrollPastEnd"`
 	Anchor        string  `json:"anchor,omitempty"`
@@ -63,15 +65,19 @@ type workspacePreview struct {
 	theme            string
 	editorFont       *documentEditorFont
 	customCSS        string
+	colorEmphasis    bool
 	lineSpacing      float64
 	scrollPastEnd    bool
 	numberFigures    bool
+	exportCallouts   []callout.Style
+	calloutSnapshot  string
 	sourceScroll     sourceScrollPosition
 	tab              *workspaceTab
 	draft            *editor.Buffer
 	path, source     string
 	kind             documentType
 	parsed           *parser.Document
+	linkVault        *workspace.Vault
 	queryIndex       *vaultindex.Index
 	queryVault       *workspace.Vault
 	document         uint64
@@ -144,7 +150,8 @@ func (p *workspacePreview) init(app *workspaceWindow) {
 	page.OnWillNavigate(func(e *mygo.NavigateEvent) {
 		e.PreventDefault()
 		if !e.UserInitiated || p.handleCodeCopyNavigation(app, view, e.URL) ||
-			p.handleAPINavigation(app, view, e.URL) || p.handleSnippetNavigation(app, view, e.URL) {
+			p.handleAPINavigation(app, view, e.URL) || p.handleSnippetNavigation(app, view, e.URL) ||
+			p.handlePDFNavigation(app, view, e.URL) {
 			return
 		}
 		if relative, anchor, currentTab, ok := previewNoteNavigation(e.URL); ok {
@@ -161,6 +168,26 @@ func (p *workspacePreview) init(app *workspaceWindow) {
 	})
 	page.LoadHTML(previewPage, "")
 	win.Invalidate()
+}
+
+func (p *workspacePreview) handlePDFNavigation(app *workspaceWindow, view *previewViewport, target string) bool {
+	relative, page, ok := previewPDFNavigation(target)
+	if !ok {
+		return false
+	}
+	win, vault, tab, document := app.win, p.linkVault, p.tab, p.document
+	if vault == nil {
+		return true
+	}
+	win.Update(func() {
+		if win.IsDestroyed() || view.IsDestroyed() || p.view != view || !p.ready || p.document != document ||
+			app.workspaceTab != tab || p.draft != app.draft || p.path != app.document.Path ||
+			app.previewDocumentType() != documentMarkdown || app.previewOrigin().vault != vault {
+			return
+		}
+		app.openVaultPDFAt(vault, relative, page)
+	})
+	return true
 }
 
 func (p *workspacePreview) refresh() {
@@ -222,14 +249,44 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 			return
 		}
 		style := theme.markdownTheme(zoom, spacing)
+		theme.colorPreviewEmphasis(c, style)
 		style.CodeColors = previewCodeTheme(theme.dark())
 		scroll := mygoui.Scroll(c).Grow(1).MinHeight(0).FillWidth().Label("Markdown Preview").Padding(24).
 			Background(mygoui.Hex(theme.BackgroundColor)).FontFeatures(theme.editorFont.features)
+		state := mygoui.Local(scroll, "preview Markdown assets", func() nativeMarkdownImageState { return nativeMarkdownImageState{} })
+		origin := app.previewOrigin()
+		origin.index = nil
+		if state.options == nil || state.origin != origin {
+			options := app.withNativeMarkdownCallouts(withMarkdownCodeBadges(&markdown.Options{Extensions: parser.GFM}))
+			if origin.vault != nil && origin.note != "" {
+				options.LoadImage = origin.loadMarkdownImage
+				options.OnLink = func(destination string) {
+					if relative, page, ok := previewPDFNavigation(destination); ok {
+						current := app.previewOrigin()
+						if current.vault == origin.vault && current.note == origin.note {
+							app.openVaultPDFAt(origin.vault, relative, page)
+						}
+						return
+					}
+					if anchor, ok := strings.CutPrefix(destination, "#"); ok {
+						options.Anchor = anchor
+						options.AnchorVersion++
+						if app.win != nil {
+							app.win.Invalidate()
+						}
+						return
+					}
+					openPreviewExternalLink(destination)
+				}
+			}
+			*state = nativeMarkdownImageState{origin: origin, options: options}
+		}
+		state.options.Theme = style
+		if state.options.LoadImage != nil {
+			text = nativeWikiAssets(scroll, text, state.options.Extensions, origin)
+		}
 		scroll.Children(func() {
-			markdown.View(c, nativeHighlightedMarkdown(scroll, text, parser.GFM), withMarkdownCodeBadges(&markdown.Options{
-				Extensions: parser.GFM,
-				Theme:      style,
-			}))
+			markdown.View(c, nativeHighlightedMarkdown(scroll, text, state.options.Extensions), state.options)
 		})
 		return
 	}
@@ -246,6 +303,7 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 	if switched {
 		p.tab, p.draft, p.path, p.kind = app.workspaceTab, app.draft, app.document.Path, kind
 		p.apiDocument = 0
+		p.linkVault = nil
 		if kind == documentMarkdown {
 			p.parsed = parser.New(webPreviewExtensions)
 		}
@@ -258,8 +316,9 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 	}
 	apiEnabled := kind == documentMarkdown && app.previewAPIEnabled()
 	themeChanged := p.theme != theme.ID || p.editorFont != theme.editorFont
+	colorEmphasis := kind == documentMarkdown && !c.Preferences().HighContrast
 	immediate := switched || themeChanged || p.customCSS != customCSS ||
-		p.lineSpacing != spacing || p.scrollPastEnd != app.preferences.ScrollPastEnd ||
+		p.colorEmphasis != colorEmphasis || p.lineSpacing != spacing || p.scrollPastEnd != app.preferences.ScrollPastEnd ||
 		p.numberFigures != app.preferences.NumberFigures || app.previewAnchor != "" ||
 		app.previewRevealLine > 0 || p.apiEnabled != apiEnabled
 	changed := p.source != text
@@ -284,10 +343,13 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 		p.apiEnabled, p.apiVersion = apiEnabled, app.textVersion
 		p.chartFiles = nil
 		var body string
+		var linkVault *workspace.Vault
 		title := app.title()
 		copies := previewCodeCopies{revision: p.revision + 1}
 		if kind == documentMarkdown {
-			resources := app.previewOrigin().resources()
+			origin := app.previewOrigin()
+			resources := origin.resources()
+			linkVault = origin.vault
 			if resources != nil && app.storage == nil && p.path == workspace.VaultHealthFile && vaultindex.IsGeneratedHealthReport(text) {
 				resources.resolveReportNote = vaultindex.HealthReportNoteResolver(app.entries)
 			}
@@ -295,7 +357,7 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 			markup := previewMarkup{doc: p.parsed, resources: resources, relative: p.path, charts: true,
 				figures: &figures, liveQueries: true, queryIndex: p.queryIndex, liveAPIFences: true,
 				codeTheme: previewCodeTheme(theme.dark()), codeCopies: &copies,
-				snippets: loadPreviewSnippets(text, theme.dark())}
+				snippets: loadPreviewSnippets(text, theme.dark()), calloutStyles: app.calloutStyles()}
 			if apiEnabled {
 				if p.apiDocument == 0 {
 					p.apiDocument = newPreviewAPIDocument()
@@ -314,14 +376,16 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 		p.revision++
 		hasMath := containsPreviewMath(body)
 		frame := previewFrame{Revision: p.revision, Document: p.document, Title: title, Label: label, HTML: body,
-			Theme: theme.ID, ThemeFonts: themeFonts, CustomCSS: customCSS, LineSpacing: spacing,
+			Theme: theme.ID, ThemeFonts: themeFonts, CustomCSS: customCSS, ColorEmphasis: colorEmphasis, LineSpacing: spacing,
 			ScrollPastEnd: p.scrollPastEnd, Anchor: app.previewAnchor, RevealLine: app.previewRevealLine, Math: hasMath}
 		if err := previewChanged.EmitPage(p.view.Page(), frame); err != nil {
 			p.refreshPending = true
 			log.Printf("Update Markdown Preview: %v", err)
 		} else {
 			p.lastFrameAt = c.Now()
+			p.linkVault = linkVault
 			p.theme, p.editorFont = theme.ID, theme.editorFont
+			p.colorEmphasis = colorEmphasis
 			p.codeCopies = copies
 			app.previewAnchor = ""
 			app.previewRevealLine = 0
@@ -427,6 +491,8 @@ type previewMarkup struct {
 	apiActions         *previewAPIActions
 	apiPrefix          int
 	apiOriginalOffsets map[int]int
+	calloutStyles      []callout.Style
+	quoteDepth         int
 }
 
 func previewLineStarts(source string, strippedFrontmatter bool) []int {
@@ -445,7 +511,11 @@ func previewLineStarts(source string, strippedFrontmatter bool) []int {
 }
 
 func (m *previewMarkup) lineAttribute(block *parser.Block) string {
-	line := sort.Search(len(m.lineStarts), func(i int) bool { return m.lineStarts[i] > block.Start })
+	return m.lineAttributeAt(block.Start)
+}
+
+func (m *previewMarkup) lineAttributeAt(offset int) string {
+	line := sort.Search(len(m.lineStarts), func(i int) bool { return m.lineStarts[i] > offset })
 	if line == 0 {
 		return ""
 	}
@@ -456,11 +526,18 @@ func (m *previewMarkup) blocks(parent int) {
 	if parent == 0 {
 		m.highlights = markdownhighlight.Markers(m.doc)
 	}
+	m.blocksFrom(parent, parent+1)
+}
+
+func (m *previewMarkup) blocksFrom(parent, first int) {
 	var previous int
 	for i := range m.doc.Children(parent) {
-		block := m.doc.Block(i)
 		prior := previous
 		previous = i
+		if i < first {
+			continue
+		}
+		block := m.doc.Block(i)
 		switch block.Kind {
 		case parser.Paragraph:
 			if parent > 0 {
@@ -525,12 +602,7 @@ func (m *previewMarkup) blocks(parent int) {
 			}
 			fmt.Fprintf(&m.out, `<div class="raw-markup">%s</div>`, html.EscapeString(source))
 		case parser.Quote:
-			fmt.Fprintf(&m.out, "<blockquote%s>", m.lineAttribute(block))
-			if block.Alert != parser.NoAlert {
-				fmt.Fprintf(&m.out, `<strong class="callout-title">%s</strong>`, html.EscapeString(block.Alert.String()))
-			}
-			m.blocks(i)
-			m.out.WriteString("</blockquote>")
+			m.writeQuote(i, block)
 		case parser.List:
 			m.list(i, block)
 		case parser.Item:
@@ -640,12 +712,16 @@ func (m *previewMarkup) table(i int, align []parser.Align) {
 }
 
 func (m *previewMarkup) inlineBlock(tag string, i int) {
-	in := m.doc.Inlines(i)
 	if tag == "" {
+		in := m.doc.Inlines(i)
 		m.inlines(in, 0, len(in))
 		return
 	}
-	anchor := m.lineAttribute(m.doc.Block(i))
+	block := m.doc.Block(i)
+	m.inlineBlockContent(tag, m.doc.Inlines(i), m.lineAttribute(block), block.Parent == 0)
+}
+
+func (m *previewMarkup) inlineBlockContent(tag string, in []parser.Inline, anchor string, topLevel bool) {
 	if tag == "p" && len(in) == 1 && in[0].Kind == parser.Text && strings.TrimSpace(in[0].Text) == "[pagebreak]" {
 		if m.standalone != htmlInApp {
 			m.out.WriteString(`<hr class="page-break">`)
@@ -657,7 +733,7 @@ func (m *previewMarkup) inlineBlock(tag string, i int) {
 	if tag == "p" && !m.embedded && (m.writeSnippetEmbed(in, anchor) || m.resources != nil && m.embedParagraph(in, anchor)) {
 		return
 	}
-	if tag == "p" && m.figures != nil && m.figureParagraph(in, anchor, m.doc.Block(i).Parent == 0) {
+	if tag == "p" && m.figures != nil && m.figureParagraph(in, anchor, topLevel) {
 		return
 	}
 	fmt.Fprintf(&m.out, "<%s%s>", tag, anchor)
@@ -680,7 +756,11 @@ func (m *previewMarkup) inlines(in []parser.Inline, start, end int) {
 		case parser.HTML:
 			m.out.WriteString(html.EscapeString(n.Text))
 		case parser.SoftBreak:
-			m.out.WriteByte('\n')
+			if m.quoteDepth > 0 && callout.ExplicitQuoteBreak(m.rawInline(n), m.quoteDepth) {
+				m.out.WriteString("<br>")
+			} else {
+				m.out.WriteByte('\n')
+			}
 		case parser.LineBreak:
 			m.out.WriteString("<br>")
 		case parser.Code:
@@ -793,8 +873,8 @@ var previewStyles = `
   .query-empty { opacity: .65; }
   .query-error { color: #e05252; }
   .page-break { margin: 1.5em 0; border-top: 1px dashed rgba(127,127,127,.4); }
-` + previewMermaidCSS + previewVegaCSS + previewAPICSS + previewSnippetCSS + sourceFilePreviewCSS + delimitedPreviewCSS + previewScrollCSS +
-	documentPreviewPalettes + documentThemeElements + documentPreviewLayout + previewCodeCSS
+` + previewMermaidCSS + previewVegaCSS + previewAPICSS + previewSnippetCSS + previewCalloutCSS + sourceFilePreviewCSS + delimitedPreviewCSS + previewScrollCSS +
+	documentPreviewPalettes + documentThemeElements + documentPreviewLayout + documentPreviewEmphasis + previewCodeCSS
 
 var previewPage = previewHTMLShell("Markdown Preview", "", previewContentPolicy, "", 0, "", "")
 
@@ -874,6 +954,7 @@ func previewScriptWithMath(math string) string {
     const css = frame.customCSS || "";
     const sameStylesheet = stylesheet.textContent === css;
     if (!sameStylesheet) stylesheet.textContent = css;
+    preview.toggleAttribute("data-color-emphasis", frame.colorEmphasis === true);
     setPreviewScrollPadding(frame.scrollPastEnd);
     if (frame.lineSpacing > 0) document.documentElement.style.setProperty("--preview-line-height", String(frame.lineSpacing));
     else document.documentElement.style.removeProperty("--preview-line-height");

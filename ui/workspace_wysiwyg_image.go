@@ -27,15 +27,20 @@ type visualImageResource struct {
 	used   uint64
 }
 
+type visualImageKey struct {
+	source string
+	wiki   bool
+}
+
 type visualImageCache struct {
 	origin previewResourceOrigin
-	images map[string]*visualImageResource
+	images map[visualImageKey]*visualImageResource
 	bytes  int64
 	use    uint64
 	active int
 }
 
-func (cache *visualImageCache) load(app *workspaceWindow, source string) *mygoui.Bitmap {
+func (cache *visualImageCache) load(app *workspaceWindow, source string, wiki bool) *mygoui.Bitmap {
 	origin := app.previewOrigin()
 	origin.index = nil
 	if cache.origin != origin {
@@ -44,12 +49,19 @@ func (cache *visualImageCache) load(app *workspaceWindow, source string) *mygoui
 	if origin.vault == nil || source == "" {
 		return nil
 	}
-	relative, ok := workspace.ResolveImagePath(origin.note, source)
-	if !ok {
+	key := visualImageKey{source, wiki}
+	var candidates []string
+	if wiki {
+		candidates = origin.wikiImageCandidates(source)
+	} else if relative, ok := workspace.ResolveImagePath(origin.note, source); ok {
+		key.source = relative
+		candidates = []string{relative}
+	}
+	if len(candidates) == 0 {
 		return nil
 	}
 	cache.use++
-	if entry := cache.images[relative]; entry != nil {
+	if entry := cache.images[key]; entry != nil {
 		entry.used = cache.use
 		return entry.bitmap
 	}
@@ -57,20 +69,23 @@ func (cache *visualImageCache) load(app *workspaceWindow, source string) *mygoui
 		return nil
 	}
 	if cache.images == nil {
-		cache.images = make(map[string]*visualImageResource)
+		cache.images = make(map[visualImageKey]*visualImageResource)
 	}
 	entry := &visualImageResource{used: cache.use}
-	cache.images[relative] = entry
+	cache.images[key] = entry
 	decode := func() *mygoui.Bitmap {
-		data, _, err := origin.vault.ReadPreviewImage(relative, 4<<20)
-		if err != nil {
-			return nil
+		for _, relative := range candidates {
+			data, _, err := origin.vault.ReadPreviewImage(relative, 4<<20)
+			if err == nil {
+				if bitmap, err := mygoui.DecodeBitmap(data); err == nil {
+					return bitmap
+				}
+			}
 		}
-		bitmap, _ := mygoui.DecodeBitmap(data)
-		return bitmap
+		return nil
 	}
 	publish := func(bitmap *mygoui.Bitmap) {
-		if cache.images[relative] != entry {
+		if cache.images[key] != entry {
 			return
 		}
 		if bitmap != nil {
@@ -79,13 +94,13 @@ func (cache *visualImageCache) load(app *workspaceWindow, source string) *mygoui
 			cache.bytes += entry.bytes
 		}
 		for len(cache.images) > 64 || cache.bytes > 384<<20 {
-			var oldest string
-			for key, candidate := range cache.images {
-				if key != relative && (oldest == "" || candidate.used < cache.images[oldest].used) {
-					oldest = key
+			var oldest visualImageKey
+			for candidateKey, candidate := range cache.images {
+				if candidateKey != key && (oldest.source == "" || candidate.used < cache.images[oldest].used) {
+					oldest = candidateKey
 				}
 			}
-			if oldest == "" {
+			if oldest.source == "" {
 				break
 			}
 			cache.bytes -= cache.images[oldest].bytes
@@ -148,6 +163,9 @@ func imageAccessibleLabel(picture *wysiwyg.Image) string {
 	if picture.Alt != "" && !picture.Block {
 		return picture.Alt
 	}
+	if picture.Wiki {
+		return path.Base(picture.Source)
+	}
 	if u, err := url.Parse(picture.Source); err == nil && u.Path != "" {
 		return path.Base(u.Path)
 	}
@@ -167,7 +185,7 @@ func (w *workspaceWYSIWYG) drawVisualImages(c *mygoui.Context, app *workspaceWin
 		}
 		width := max(1, view.viewport.W-2*view.padding)
 		selected := view.start <= offset && offset < view.end
-		bitmap := w.images.load(app, picture.Source)
+		bitmap := w.images.load(app, picture.Source, picture.Wiki)
 		if picture.Block && start == offset && end == offset+1 && !text.ParagraphStyleAt(offset).Quote {
 			w.drawImageCard(c, app, picture, text, box, view, width, bitmap, selected)
 			return true
@@ -228,7 +246,11 @@ func (w *workspaceWYSIWYG) drawImageCard(c *mygoui.Context, app *workspaceWindow
 		if w.editable(app) {
 			// The full form is the drop target so a child field or
 			// button does not change where the selected file goes.
-			if files := card.DroppedFiles(); len(files) == 1 {
+			files := card.DroppedFiles()
+			if drop, ok := mygoui.DropData(card, visualImageFileDropOptions); ok {
+				files, _ = drop.Data.Files()
+			}
+			if len(files) == 1 {
 				app.applyVisualImageFile(w.session, box.Start, files[0])
 			}
 		}
@@ -239,7 +261,7 @@ func (w *workspaceWYSIWYG) drawImageCard(c *mygoui.Context, app *workspaceWindow
 	height := float32(visualImageMinHeight)
 	if bitmap != nil {
 		naturalW, naturalH := mygoui.ImageSize(bitmap)
-		if picture.HasTransform() {
+		if picture.HasTransform() || picture.WikiWidth > 0 {
 			base, maxHeight, imageWidth, height = transformedVisualImageSize(picture, naturalW, naturalH, width, w.imageResize)
 		} else {
 			base = naturalH * min(1, width/naturalW)
@@ -365,7 +387,7 @@ func (w *workspaceWYSIWYG) drawImageLinkForm(c *mygoui.Context, app *workspaceWi
 	mygoui.Button(c.Key("confirm image link"), "Confirm").Absolute().Right(24).Top(8).Width(min(101, width*.32)).Height(40).
 		Font(font).FontSize(14).OnClick(submit).Disabled(!w.editable(app))
 	if width >= 400 {
-		if bitmap := w.images.load(app, strings.TrimSpace(state.link)); bitmap != nil {
+		if bitmap := w.images.load(app, strings.TrimSpace(state.link), false); bitmap != nil {
 			naturalW, naturalH := mygoui.ImageSize(bitmap)
 			factor := min(1, 48/naturalH, 64/naturalW)
 			mygoui.Image(c.Key("image link preview"), bitmap).Absolute().Right(135).Top((56-naturalH*factor)/2).
@@ -411,7 +433,7 @@ func (w *workspaceWYSIWYG) resizeVisualImage(c *mygoui.Context, app *workspaceWi
 			return false
 		}
 		minHeight := float32(visualImageMinHeight)
-		if picture.HasTransform() {
+		if picture.HasTransform() || picture.WikiWidth > 0 {
 			minHeight = min(drag.original, base*.01)
 		}
 		drag.height = min(maxHeight, max(minHeight, drag.original+y-drag.pressY))
@@ -532,6 +554,13 @@ func (app *workspaceWindow) applyVisualImageFile(session *wysiwyg.Session, offse
 	destination, err := origin.vault.ImportImage(origin.note, absolute)
 	if err != nil {
 		app.problem = fmt.Sprintf("Could not import the image. %v", err)
+		return
+	}
+	token := importedImageMarkdown(origin.note, destination, "", picture.Caption)
+	if strings.HasPrefix(token, "![[") && session.FillWikiImage(offset, picture, token) {
+		session.Document.SetSelection(offset, offset+1)
+		w.focus = true
+		w.sync(app)
 		return
 	}
 	w.commitVisualImage(app, offset, picture, destination, picture.Caption, picture.Ratio)

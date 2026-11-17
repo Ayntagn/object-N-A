@@ -18,6 +18,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
+	"unicode"
 
 	_ "golang.org/x/image/webp"
 )
@@ -104,16 +106,99 @@ func (v *Vault) ImportImage(notePath, pickedAbsolute string) (string, error) {
 		return imageDestination(note, relative)
 	}
 
+	return importNoteImage(noteDir, note, name, func() ([]byte, error) { return readPickedImage(picked) })
+}
+
+// ImportPNG stores an image transferred without a local file beside a saved note.
+func (v *Vault) ImportPNG(notePath string, data []byte) (string, error) {
+	return v.importImageBytes(notePath, "image.png", data)
+}
+
+// ImportPastedPNG stores clipboard bytes using a local timestamp as the name.
+func (v *Vault) ImportPastedPNG(notePath string, data []byte, at time.Time) (string, error) {
+	return v.importImageBytes(notePath, "Pasted image "+at.Format("20060102150405")+".png", data)
+}
+
+// ImportDownloadedImage validates and stores downloaded image bytes unchanged
+// in the saved note's images directory.
+func (v *Vault) ImportDownloadedImage(notePath, address string, data []byte) (string, error) {
+	source, err := url.Parse(address)
+	if err != nil {
+		return "", errInvalidImageURL
+	}
+	if err := validateImageURL(source); err != nil {
+		return "", err
+	}
+	var extension string
+	switch http.DetectContentType(data) {
+	case "image/png":
+		extension = ".png"
+	case "image/jpeg":
+		extension = ".jpg"
+	case "image/gif":
+		extension = ".gif"
+	case "image/webp":
+		extension = ".webp"
+	default:
+		return "", errors.New("downloaded file is not a supported raster image")
+	}
+	return v.importImageBytes(notePath, downloadedImageName(source.Path, extension), data)
+}
+
+func downloadedImageName(urlPath, extension string) string {
+	name := path.Base(urlPath)
+	stem := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return '-'
+		}
+		return r
+	}, strings.TrimSuffix(name, path.Ext(name)))
+	if len(stem) > 120 {
+		stem = strings.ToValidUTF8(stem[:120], "")
+	}
+	stem = strings.Trim(stem, " .")
+	// Keep file names usable when a Vault is opened on Windows.
+	portable, _, _ := strings.Cut(strings.ToUpper(stem), ".")
+	portable = strings.TrimRight(portable, " ")
+	switch portable {
+	case "", "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+		"COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³":
+		stem = "image"
+	}
+	return stem + extension
+}
+
+func (v *Vault) importImageBytes(notePath, name string, data []byte) (string, error) {
+	note, err := lifecycleNotePath(notePath)
+	if err != nil {
+		return "", err
+	}
+	v.writes.Lock()
+	defer v.writes.Unlock()
+	noteDir, err := openVaultDirectory(v.root, filepath.Dir(note))
+	if err != nil {
+		return "", err
+	}
+	defer noteDir.Close()
+	return importNoteImage(noteDir, note, name, func() ([]byte, error) { return data, nil })
+}
+
+func importNoteImage(noteDir *os.Root, note, name string, read func() ([]byte, error)) (string, error) {
 	info, err := noteDir.Lstat(filepath.Base(note))
 	if err != nil {
 		return "", fmt.Errorf("save the note before importing an image: %w", err)
 	}
 	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("%q is not a regular note", notePath)
+		return "", fmt.Errorf("%q is not a regular note", note)
 	}
-	data, err := readPickedImage(picked)
+	data, err := read()
 	if err != nil {
 		return "", err
+	}
+	if len(data) > maxImageBytes {
+		return "", fmt.Errorf("%q exceeds the %d MiB image limit", name, maxImageBytes>>20)
 	}
 	mime, err := checkImageData(name, data)
 	if err != nil {
@@ -207,24 +292,6 @@ func systemImagePath(name string) string {
 		}
 	}
 	return name
-}
-
-func readPickedImage(absolute string) ([]byte, error) {
-	volume := filepath.VolumeName(absolute)
-	rootPath := volume + string(filepath.Separator)
-	source, err := os.OpenRoot(rootPath)
-	if err != nil {
-		return nil, err
-	}
-	defer source.Close()
-	name := strings.TrimPrefix(absolute, rootPath)
-	dir, err := openVaultDirectory(source, filepath.Dir(name))
-	if err != nil {
-		return nil, err
-	}
-	defer dir.Close()
-	data, _, err := readRegularFileLimit(dir, filepath.Base(name), maxImageBytes)
-	return data, err
 }
 
 // Open each checked directory relative to its pinned parent. Comparing the

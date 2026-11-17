@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 
+	"cyberwriter/internal/core/callout"
 	"cyberwriter/ui/wysiwyg"
 	mygoui "github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/richtext"
@@ -11,6 +12,14 @@ import (
 // The title attachment also reserves the extra line space in the card.
 // MyGo's paragraph boxes exclude the spacing between paragraphs.
 const calloutTopInset, calloutBottomInset = float32(15), float32(10.5)
+
+var calloutAXLabels = func() map[string]string {
+	labels := map[string]string{"important": callout.Resolve("important", nil).Name}
+	for _, style := range callout.Menu(nil) {
+		labels[style.Kind] = style.Name
+	}
+	return labels
+}()
 
 func (w *workspaceWYSIWYG) visualTagStyle(tag string, span *mygoui.Span) {
 	switch tag {
@@ -28,7 +37,7 @@ func (w *workspaceWYSIWYG) visualTagStyle(tag string, span *mygoui.Span) {
 // The callout is editable in the parent RichText. These noninteractive
 // siblings paint its rounded background and mark the same range in AX.
 func (w *workspaceWYSIWYG) drawCallouts(c *mygoui.Context, viewport mygoui.Rect, padding float32,
-	text richtext.Text, boxes []richtext.ParagraphBox) {
+	text richtext.Text, boxes []richtext.ParagraphBox, styles []callout.Style) {
 	if viewport.W <= 2*padding {
 		return
 	}
@@ -67,9 +76,9 @@ func (w *workspaceWYSIWYG) drawCallouts(c *mygoui.Context, viewport mygoui.Rect,
 			wysiwyg.CalloutAt(text, boxes[last+1].Start) == nil {
 			last++
 		}
-		style := calloutAppearance(card.Kind)
-		label := style.name
-		if !strings.EqualFold(card.Kind, label) {
+		style := callout.Resolve(card.Kind, styles)
+		label := calloutAXLabels[strings.ToLower(card.Kind)]
+		if label == "" {
 			label = card.Kind
 		}
 		const corner = float32(6)
@@ -82,8 +91,8 @@ func (w *workspaceWYSIWYG) drawCallouts(c *mygoui.Context, viewport mygoui.Rect,
 		if end < text.Len() && wysiwyg.CalloutParagraphID(text, end+1) == id {
 			bottom = max(bottom, viewport.H+corner)
 		}
-		background := mygoui.RGBA(127, 127, 127, .08)
-		border := mygoui.Hex(style.border)
+		border := mygoui.Hex(style.Color)
+		background := border.Alpha(.09)
 		mygoui.Box(c.Key(id).Key(box.Start)).Absolute().Left(padding).Right(padding).Top(top).Height(max(1, bottom-top)).
 			ZIndex(-1).PassThrough().Role(mygoui.RoleGroup).Label(label + " callout").
 			Draw(func(p *mygoui.Painter, r mygoui.Rect) {
@@ -94,13 +103,27 @@ func (w *workspaceWYSIWYG) drawCallouts(c *mygoui.Context, viewport mygoui.Rect,
 			})
 		if title != nil {
 			size := float32(w.fontSize())
-			icon := mygoui.ShapeText(style.icon, mygoui.Font{Size: size * .95}, 0)
+			icon := mygoui.ShapeText(style.Icon, mygoui.Font{Size: size * .95}, 0)
 			width, _ := icon.Size()
+			width = max(21, width+4)
 			baseline := icon.Lines()[0].Baseline
 			descent := size * .55
 			ascent := max(16, size) + 22
-			if card.SetIcon(max(21, width+4), ascent, func(p *mygoui.Painter, r mygoui.Rect) {
-				p.TextLayout(icon, r.X, r.Y+r.H-descent-baseline, ink)
+			_, titleEnd := text.ParagraphRange(box.Start)
+			var fallbackTitle *mygoui.TextLayout
+			if titleEnd == box.Start+1 {
+				// Show a default title while keeping the editable source title empty.
+				fallbackTitle = mygoui.ShapeText(style.Name, mygoui.Font{Size: size * .95, Weight: 700}, 0)
+			}
+			if card.SetIcon(width, ascent, func(p *mygoui.Painter, r mygoui.Rect) {
+				y := r.Y + r.H - descent
+				p.TextLayout(icon, r.X, y-baseline, ink)
+				if fallbackTitle != nil {
+					available := max(0, viewport.W-padding-r.X-width)
+					p.Clip(mygoui.Rect{X: r.X + width, Y: r.Y, W: available, H: r.H}, 0, func() {
+						p.TextLayout(fallbackTitle, r.X+width, y-fallbackTitle.Lines()[0].Baseline, ink)
+					})
+				}
 			}) {
 				w.calloutLayout = !w.calloutLayout
 				c.Invalidate()
@@ -116,13 +139,14 @@ func (w *workspaceWYSIWYG) drawQuoteRail(c *mygoui.Context, text richtext.Text, 
 	box richtext.ParagraphBox, style richtext.ParagraphStyle) {
 	size := float32(w.fontSize())
 	top := box.Top
-	if box.Start > 0 && style.List == richtext.NoList && style.Heading == 0 && !style.CodeBlock {
+	if box.Start > 0 && !style.SoftBreak && style.List == richtext.NoList && style.Heading == 0 && !style.CodeBlock {
 		prev := text.ParagraphStyleAt(box.Start - 1)
 		if prev.Quote && prev.List == richtext.NoList && prev.Heading == 0 && !prev.CodeBlock {
 			top -= size * .75
 		}
 	}
-	mygoui.Box(c.Key(box.Start).Key("quote rail")).Absolute().
+	type quoteRailKey struct{ start int }
+	mygoui.Box(c.Key(quoteRailKey{box.Start})).Absolute().
 		Left(padding + float32(style.Indent)*size*1.7).Top(top).
 		Width(3).Height(box.Top + box.Height - top).ZIndex(-1).Radius(1.5).
 		Background(c.Theme().Border).Role(mygoui.RoleNone).IgnoreInput(true)

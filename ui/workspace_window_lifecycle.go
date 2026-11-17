@@ -76,13 +76,14 @@ func (a *workspaceApplication) newWindow(tab *workspaceTab, origin *workspaceWin
 		app.vaultTreeEntries = origin.vaultTreeEntries
 		app.vaultFileCount = origin.vaultFileCount
 		app.index.data = origin.index.data
+		app.index.wikiImages = origin.index.wikiImages
+		app.index.wikiPDFs = origin.index.wikiPDFs
 		app.folders = make(map[string]*bool)
 		app.previewZoom = origin.previewZoom
 	}
 	if tab.code != nil {
 		// Preserve the buffer, selection and undo history when the tab moves.
-		tab.code.OnInput = app.sourceInput
-		tab.code.ContextMenu = app.sourceContextMenu
+		app.bindSourceEditorInput(tab.code)
 	}
 	a.windows = append(a.windows, app)
 	app.win = mygo.NewWindow(options)

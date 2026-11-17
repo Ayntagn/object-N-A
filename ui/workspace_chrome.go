@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
@@ -65,7 +66,7 @@ func (app *workspaceWindow) view(c *mygoui.Context) {
 			})
 			return
 		}
-		body := mygoui.Row(c).Grow(1).MinHeight(0).AlignItems(mygoui.Stretch)
+		body := mygoui.Row(c.Key("workspace body")).Grow(1).MinHeight(0).AlignItems(mygoui.Stretch)
 		if app.focusMode {
 			body.Padding(0, 0, 2)
 		}
@@ -282,7 +283,9 @@ func (app *workspaceWindow) sidebar(c *mygoui.Context) {
 			return
 		}
 		mygoui.Column(c).Padding(0, 16, 8).Gap(8).Children(func() {
-			mygoui.Row(c).Gap(8).AlignItems(mygoui.Center).Children(func() {
+			heading := mygoui.Row(c).Gap(8).AlignItems(mygoui.Center)
+			app.vaultTreeRootDrop(c, heading)
+			heading.Children(func() {
 				chromeIcon(c, "building.columns", 16)
 				mygoui.Text(c, filepath.Base(app.root)).Role(mygoui.RoleHeading).Level(2).Bold().
 					FontSize(15).SingleLine().Ellipsis("…")
@@ -328,6 +331,8 @@ func (app *workspaceWindow) updateEntries(entries []workspace.Entry) {
 		app.refreshQuickSwitcherFiles()
 	}
 	present := make(map[string]bool, len(app.recentPaths))
+	images := make(wikiImageNames)
+	pdfs := wikiPDFIndex{paths: make(map[string]bool), byName: make(map[string]string)}
 	var scan func([]workspace.Entry)
 	scan = func(entries []workspace.Entry) {
 		for _, entry := range entries {
@@ -338,9 +343,26 @@ func (app *workspaceWindow) updateEntries(entries []workspace.Entry) {
 			if slices.Contains(app.recentPaths, entry.Path) {
 				present[entry.Path] = true
 			}
+			if workspace.IsRasterImagePath(entry.Name) {
+				if _, exists := images[entry.Name]; exists {
+					images[entry.Name] = ""
+				} else {
+					images[entry.Name] = entry.Path
+				}
+			}
+			if workspace.IsPDFPath(entry.Name) {
+				pdfs.add(entry)
+			}
 		}
 	}
 	scan(entries)
+	if app.index.wikiImages == nil || !maps.Equal(*app.index.wikiImages, images) {
+		app.index.wikiImages = &images
+	}
+	if old := app.index.wikiPDFs; old == nil || !maps.Equal(old.paths, pdfs.paths) {
+		app.index.wikiPDFs = &pdfs
+		app.previewPane.refreshPending = true
+	}
 	app.recentPaths = slices.DeleteFunc(app.recentPaths, func(relative string) bool { return !present[relative] })
 	app.updateRecentMenu()
 	app.updateVaultStatsMenu()

@@ -221,6 +221,7 @@ func (app *workspaceWindow) previewThemeSettings(c *mygoui.Context) {
 					"point.3.connected.trianglepath.dotted", 48, &app.preferences.GraphColorNodesByTag)
 			})
 		})
+		app.calloutStyleSettings(c)
 		app.customStylesheetSettings(c)
 	})
 }
@@ -256,7 +257,9 @@ func (app *workspaceWindow) previewThemeSample(c *mygoui.Context, theme document
 		Children(func() {
 			mygoui.Text(c, tr("Heading", "标题")).FontSize(13).Bold().TextColor(mygoui.Hex(theme.HeadingColor))
 			sample := tr("Body text with **bold** and *italic* formatting.", "正文可以使用 **粗体** 和 *斜体*。")
-			markdown.View(c, sample, &markdown.Options{Theme: theme.markdownTheme(100, 0)})
+			style := theme.markdownTheme(100, 0)
+			theme.colorPreviewEmphasis(c, style)
+			markdown.View(c, sample, &markdown.Options{Theme: style})
 			mygoui.Text(c, tr("Link text", "链接文字")).FontSize(13).TextColor(mygoui.Hex(theme.LinkColor))
 			mygoui.Row(c).Children(func() {
 				mygoui.Text(c, tr("Code block", "代码块")).Font("monospace").FontSize(12).Padding(7, 8).Radius(5).
@@ -327,4 +330,11 @@ func (theme documentPreviewTheme) markdownTheme(zoom int, spacing float64) *mark
 
 func (font *documentEditorFont) applyNative(style *markdown.Theme) {
 	style.Font, style.CodeFont = font.nativeFamily, font.nativeFamily
+}
+
+func (theme documentPreviewTheme) colorPreviewEmphasis(c *mygoui.Context, style *markdown.Theme) {
+	if !c.Preferences().HighContrast {
+		italic, bold := theme.emphasisColors()
+		style.EmphasisItalic, style.EmphasisBold = mygoui.Hex(italic), mygoui.Hex(bold)
+	}
 }
