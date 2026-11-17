@@ -1,4 +1,4 @@
-// spec: FEAT-WYS-IMAGE / EV-EDITOR-004 / EV-UI-147 / EV-UI-156 / EV-UI-157
+// spec: FEAT-WYS-IMAGE / EV-EDITOR-004 / EV-UI-147 / EV-UI-156 / EV-UI-157 / EV-MYGO-290
 package ui
 
 import (
@@ -182,7 +182,7 @@ func TestVisualImageImportAndTemplateRoutes(t *testing.T) {
 		if got := app.draft.String(); got != withTemplate {
 			t.Fatalf("visual template left %q", got)
 		}
-		name := "图 #1.png"
+		name := "图 1.png"
 		external := filepath.Join(t.TempDir(), name)
 		data := writeImageFixture(t, external, color.RGBA{200, 110, 80, 255})
 		if err := os.Mkdir(filepath.Join(filepath.Dir(file), "images"), 0o700); err != nil {
@@ -194,11 +194,11 @@ func TestVisualImageImportAndTemplateRoutes(t *testing.T) {
 		if !ok || !tester.DropFiles(field.Bounds.X+field.Bounds.W/2, field.Bounds.Y+field.Bounds.H/2, external) {
 			t.Fatal("image did not drop onto the empty card")
 		}
-		want := strings.Replace(withTemplate, "![1.00]()", "![1.00](images/%E5%9B%BE%20%231-1.png)", 1)
+		want := strings.Replace(withTemplate, "![1.00]()", "![[images/图 1-1.png]]", 1)
 		if got := app.draft.String(); got != want {
 			t.Fatalf("import left %q, problem %q", got, app.problem)
 		}
-		for path, bytesOnDisk := range map[string][]byte{existing: prior, filepath.Join(filepath.Dir(existing), "图 #1-1.png"): data} {
+		for path, bytesOnDisk := range map[string][]byte{existing: prior, filepath.Join(filepath.Dir(existing), "图 1-1.png"): data} {
 			if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, bytesOnDisk) {
 				t.Fatalf("%s bytes differ, error %v", path, err)
 			}
@@ -213,7 +213,7 @@ func TestVisualImageImportAndTemplateRoutes(t *testing.T) {
 		}
 		app.setTabDocument(app.workspaceTab, saved)
 		tester.Frame()
-		if info, ok := tester.AccessByRole(mygoui.RoleImage, "图 #1-1.png"); !ok || info.Bounds.H != 200 {
+		if info, ok := tester.AccessByRole(mygoui.RoleImage, "图 1-1.png"); !ok || info.Bounds.H != 200 {
 			t.Fatalf("reopened imported image AX = %+v", info)
 		}
 	})

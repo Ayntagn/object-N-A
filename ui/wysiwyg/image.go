@@ -2,9 +2,11 @@ package wysiwyg
 
 import (
 	"crypto/rand"
+	"path"
 	"strconv"
 	"strings"
 
+	"cyberwriter/internal/core/vaultindex"
 	"cyberwriter/internal/core/workspace"
 	mygoui "github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown/parser"
@@ -20,10 +22,11 @@ const imageCaretID = "cyberwriter-image-caret"
 type Image struct {
 	ID, Source, Caption, Alt string
 	ImageTransform
-	Block    bool
-	token    string
-	markdown string
-	object   *richtext.Attachment
+	Block, Wiki bool
+	WikiWidth   int
+	token       string
+	markdown    string
+	object      *richtext.Attachment
 }
 
 func newImage(id string, block bool, source, caption, alt, token, suffix string, transform ImageTransform) *Image {
@@ -74,7 +77,8 @@ func (p *Image) SetVisual(width, height float32, draw func(*mygoui.Painter, mygo
 
 type imageRegion struct {
 	start, tokenEnd, end int
-	block                bool
+	block, wiki          bool
+	width                int
 	src, alt, tip        string
 	transform            ImageTransform
 }
@@ -89,14 +93,37 @@ func imageRegions(doc *parser.Document) []imageRegion {
 			continue
 		}
 		inlines := doc.Inlines(i)
+		isRootParagraph := block.Parent == 0 && block.Kind == parser.Paragraph
+		if isRootParagraph {
+			if link, transform, end, ok := ReadWikiBlockImage(doc.Source(), inlines); ok {
+				region := wikiImageRegion(link, true)
+				region.end, region.transform = end, transform
+				regions = append(regions, region)
+				continue
+			}
+		}
 		for j := 0; j < len(inlines); {
 			inline := inlines[j]
+			if inline.Kind == parser.Text && inline.Start >= block.Start && inline.End <= block.End &&
+				strings.Contains(inline.Text, "![[") {
+				raw := doc.Source()[inline.Start:inline.End]
+				for _, link := range vaultindex.Wikilinks(raw) {
+					if !link.Embed || !workspace.IsRasterImagePath(link.Target) {
+						continue
+					}
+					blockImage := isRootParagraph && len(inlines) == 1 &&
+						strings.TrimSpace(raw[:link.Start]) == "" && strings.TrimSpace(raw[link.End:]) == ""
+					link.Start += inline.Start
+					link.End += inline.Start
+					regions = append(regions, wikiImageRegion(link, blockImage))
+				}
+			}
 			if inline.Kind == parser.Image && !inline.Pending && inline.Start >= block.Start && inline.End <= block.End {
 				if inline.End > inline.Start && doc.Source()[inline.End-1] == ')' {
 					alt := parser.PlainText(inlines[j+1 : inline.Next])
 					region := imageRegion{start: inline.Start, tokenEnd: inline.End, end: inline.End,
 						src: inline.Dest, alt: alt, tip: inline.Title, transform: ImageTransform{Ratio: 1}}
-					if block.Parent == 0 && block.Kind == parser.Paragraph && j == 0 {
+					if isRootParagraph && j == 0 {
 						if transform, end, ok := ReadBlockImageTransform(doc.Source(), inlines); ok {
 							region.block, region.end, region.transform = true, end, transform
 						} else if inline.Next == len(inlines) {
@@ -113,6 +140,33 @@ func imageRegions(doc *parser.Document) []imageRegion {
 	return regions
 }
 
+func wikiImageRegion(link vaultindex.Wikilink, block bool) imageRegion {
+	region := imageRegion{
+		start: link.Start, tokenEnd: link.End, end: link.End,
+		block: block, wiki: true, src: link.Target, alt: path.Base(link.Target),
+		transform: ImageTransform{Ratio: 1},
+	}
+	if link.Label != link.Target {
+		if width, err := strconv.Atoi(link.Label); err == nil && width > 0 {
+			region.width = width
+		} else {
+			region.tip, region.alt = link.Label, link.Label
+		}
+	}
+	return region
+}
+
+func wikiImageTokenRegion(token string) (imageRegion, bool) {
+	doc := parser.New(Extensions)
+	doc.Set(token)
+	regions := imageRegions(doc)
+	if len(regions) != 1 {
+		return imageRegion{}, false
+	}
+	region := regions[0]
+	return region, region.wiki && region.block && region.start == 0 && region.tokenEnd == len(token)
+}
+
 func projectImages(doc *parser.Document, source string, formulas map[string]*Formula) (string, map[string]*Image) {
 	regions := imageRegions(doc)
 	if len(regions) == 0 {
@@ -127,6 +181,7 @@ func projectImages(doc *parser.Document, source string, formulas map[string]*For
 		}
 		picture := newImage("", region.block, region.src, region.tip, region.alt,
 			source[region.start:region.tokenEnd], source[region.tokenEnd:region.end], region.transform)
+		picture.Wiki, picture.WikiWidth = region.wiki, region.width
 		images[picture.object.URL] = picture
 		out.WriteString(source[start:region.start])
 		out.WriteString(attachmentMarkdown(picture.object))
@@ -163,6 +218,24 @@ func (s *Session) InsertImage(source string, fromToolbar bool) bool {
 	return s.insertStandalone(picture.object, imageCaretID, fromToolbar && empty)
 }
 
+// FillWikiImage replaces an empty image card with a saved attachment in
+// the same undo step and keeps any existing sizing.
+func (s *Session) FillWikiImage(offset int, previous *Image, token string) bool {
+	picture, ok := s.currentImage(offset, previous)
+	if !ok || picture.Source != "" {
+		return false
+	}
+	region, ok := wikiImageTokenRegion(token)
+	if !ok {
+		return false
+	}
+	transform := picture.ImageTransform
+	next := newImage(picture.ID, true, region.src, region.tip, region.alt, token, transform.suffix(""), transform)
+	next.Wiki, next.WikiWidth = true, region.width
+	s.replaceImage(offset, next)
+	return true
+}
+
 // ChangeImage updates a card with a single RichText undo step.
 func (s *Session) ChangeImage(offset int, previous *Image, source, caption string, ratio float64) (*Image, bool) {
 	picture, ok := s.currentImage(offset, previous)
@@ -174,6 +247,31 @@ func (s *Session) ChangeImage(offset int, previous *Image, source, caption strin
 		return nil, false
 	}
 	alt, token, suffix := picture.Alt, picture.token, picture.markdown[len(picture.token):]
+	if picture.Wiki {
+		if source != picture.Source {
+			return nil, false
+		}
+		width := picture.WikiWidth
+		if caption != picture.Caption {
+			caption = strings.TrimSpace(caption)
+			token = "![[" + source
+			if caption != "" {
+				token += "|" + caption
+			}
+			token += "]]"
+			region, ok := wikiImageTokenRegion(token)
+			if !ok || region.src != source || region.tip != caption {
+				return nil, false
+			}
+			alt, width = region.alt, region.width
+		}
+		if ratio != picture.Ratio {
+			suffix = transform.suffix("")
+		}
+		next := newImage(picture.ID, true, source, caption, alt, token, suffix, transform)
+		next.Wiki, next.WikiWidth = true, width
+		return s.replaceImage(offset, next), true
+	}
 	if ratio != picture.Ratio {
 		if picture.HasTransform() {
 			suffix = transform.suffix(alt)
@@ -194,7 +292,12 @@ func (s *Session) TransformImage(offset int, previous *Image, transform ImageTra
 	if !ok || picture.Source == "" || !transform.valid() || transform == picture.ImageTransform {
 		return nil, false
 	}
-	next := newImage(picture.ID, true, picture.Source, picture.Caption, picture.Alt, picture.token, transform.suffix(picture.Alt), transform)
+	alt := picture.Alt
+	if picture.Wiki {
+		alt = ""
+	}
+	next := newImage(picture.ID, true, picture.Source, picture.Caption, picture.Alt, picture.token, transform.suffix(alt), transform)
+	next.Wiki, next.WikiWidth = picture.Wiki, picture.WikiWidth
 	return s.replaceImage(offset, next), true
 }
 

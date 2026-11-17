@@ -2,9 +2,9 @@ package wysiwyg
 
 import (
 	"crypto/rand"
-	"regexp"
 	"strings"
 
+	"cyberwriter/internal/core/callout"
 	"cyberwriter/internal/core/workspace"
 	mygoui "github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown/parser"
@@ -32,16 +32,12 @@ type calloutRegion struct {
 	quotedBody, body     string
 }
 
-// The original Markdown reader accepts an ASCII type name and an optional
-// Obsidian fold marker. The active WYS schema stores just the type.
-var calloutHeader = regexp.MustCompile(`^\\?\[!([A-Za-z](?:[A-Za-z0-9_-]|\\_)*)\\?\]([+-]?)[\t ]*`)
-
 func readCalloutHeader(line string) (kind string, titleStart int) {
-	match := calloutHeader.FindStringSubmatchIndex(line)
-	if match == nil {
+	header, ok := callout.ParseHeader(line)
+	if !ok {
 		return "", 0
 	}
-	return strings.ReplaceAll(line[match[2]:match[3]], `\_`, "_"), match[1]
+	return header.Kind, header.TitleOffset
 }
 
 func readCalloutRegions(doc *parser.Document) []calloutRegion {
@@ -68,11 +64,7 @@ func readCalloutRegions(doc *parser.Document) []calloutRegion {
 		region := calloutRegion{start: start, end: start + len(raw), kind: kind, heading: head[:titleStart], title: head[titleStart:]}
 		if hasBody {
 			region.quotedBody = "\n" + body
-			lines := strings.Split(body, "\n")
-			for i, line := range lines {
-				lines[i] = line[quotePrefixLength(line):]
-			}
-			region.body = strings.Trim(strings.Join(lines, "\n"), "\n")
+			region.body = projectCalloutBody(body)
 		}
 		out = append(out, region)
 	}
@@ -216,14 +208,14 @@ func (s *Session) PrepareCalloutTyping() {
 	doc.SetTypingAttributes(attrs)
 }
 
-func (s *Session) projectCallouts(doc *parser.Document, source string) (string, map[string][]richtext.Paragraph, map[string]string, bool) {
+func (s *Session) projectCallouts(doc *parser.Document, source string) (string, map[string][]richtext.Paragraph, map[string]visualWikilink, bool) {
 	regions := readCalloutRegions(doc)
 	if len(regions) == 0 {
 		return source, nil, nil, true
 	}
 	var out strings.Builder
 	groups := make(map[string][]richtext.Paragraph, len(regions))
-	links := make(map[string]string)
+	links := make(map[string]visualWikilink)
 	start := 0
 	for _, region := range regions {
 		parsed := parser.New(Extensions)

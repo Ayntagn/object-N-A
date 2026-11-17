@@ -68,11 +68,15 @@ func (app *workspaceWindow) newSourceEditor(tab *workspaceTab) *editor.State {
 		NoScrollPastEnd: true,
 		NoAutoClose:     true,
 		NoActiveLine:    true,
-		OnInput:         app.sourceInput,
-		ContextMenu:     app.sourceContextMenu,
 	}
-	code.WrapTextInput = (&sourceParagraphTextInput{app: app, code: code}).wrap
+	app.bindSourceEditorInput(code)
 	return code
+}
+
+func (app *workspaceWindow) bindSourceEditorInput(code *editor.State) {
+	code.OnInput = app.sourceInput
+	code.ContextMenu = app.sourceContextMenu
+	code.WrapTextInput = (&sourceMarkdownTextInput{app: app, code: code}).wrap
 }
 
 func (app *workspaceWindow) sourceContextMenu(m *mygoui.Menu) {
@@ -112,6 +116,13 @@ func (app *workspaceWindow) drawSourceEditor(c *mygoui.Context, tab *workspaceTa
 		language = nil
 	}
 	code := tab.code
+	services := c.Services()
+	code.OnInput = func(event mygoui.InputEvent) bool {
+		if imagePasteCommand(event) && app.pasteSourceImage(tab, services) {
+			return true
+		}
+		return app.sourceInput(event)
+	}
 	tab.draft.SetLanguage(language)
 	code.Label = label
 	code.Theme = app.sourceEditorTheme(tab, c.Theme().Dark)
@@ -165,6 +176,7 @@ func (app *workspaceWindow) drawSourceEditor(c *mygoui.Context, tab *workspaceTa
 				app.selectMultiFileTile(tab)
 			}
 		}
+		app.dropIntoSourceEditor(source, tab)
 		app.sourceTypewriter(c, source, code)
 		code.RenderFindBar = nil
 		if app.focusSource && tab == app.workspaceTab {
@@ -172,6 +184,67 @@ func (app *workspaceWindow) drawSourceEditor(c *mygoui.Context, tab *workspaceTa
 			app.focusSource = false
 		}
 	})
+}
+
+func (app *workspaceWindow) dropIntoSourceEditor(source mygoui.Element, tab *workspaceTab) {
+	if tab.code.ReadOnly || !app.acceptsNoteImages(tab) {
+		return
+	}
+	drop, dropped := mygoui.DropData(source, noteDropOptions)
+	if !dropped {
+		return
+	}
+	offset, ok := tab.code.OffsetAtPoint(drop.X, drop.Y)
+	if !ok {
+		return
+	}
+	code, active := tab.code, app.workspaceTab
+	before := tab.draft.Snapshot()
+	at := offset
+	app.applyNoteDrop(tab, drop.Data, func() bool {
+		if tab.code != code || code.ReadOnly {
+			return false
+		}
+		mode := tab.mode
+		if tab == app.workspaceTab {
+			mode = app.displayedMode()
+		} else if app.multiFile.active && !app.multiFile.rendered {
+			mode = sourceMode
+		}
+		if mode != sourceMode && mode != splitMode {
+			return false
+		}
+		current := tab.draft.Snapshot()
+		if current.Version() != before.Version() {
+			var mapped bool
+			at, mapped = rebaseNoteDropOffset(before.String(), current.String(), offset)
+			return mapped
+		}
+		return true
+	}, func(markdown string, hasImage bool) {
+		if hasImage {
+			markdown = sourceImageBlock(tab.draft.Snapshot(), at, at, markdown)
+		}
+		if code.InsertAt(at, markdown) && (app.workspaceTab == active || app.workspaceTab == tab) {
+			app.selectMultiFileTile(tab)
+			app.focusSource = app.workspaceTab == tab
+		}
+	})
+}
+
+func sourceImageBlock(snapshot editor.Snapshot, start, end int, markdown string) string {
+	const blankLine = "\n\n"
+	if start > 0 {
+		before := snapshot.Slice(max(0, start-len(blankLine)), start)
+		newlines := len(before) - len(strings.TrimRight(before, "\n"))
+		markdown = blankLine[newlines:] + markdown
+	}
+	if end < snapshot.Len() {
+		after := snapshot.Slice(end, min(snapshot.Len(), end+len(blankLine)))
+		newlines := len(after) - len(strings.TrimLeft(after, "\n"))
+		markdown += blankLine[newlines:]
+	}
+	return markdown
 }
 
 // Fixed-pitch source text keeps each ASCII cell's advance even beside
@@ -235,10 +308,16 @@ func (app *workspaceWindow) sourceInput(event mygoui.InputEvent) bool {
 		app.toggleLineNumbers()
 		return true
 	}
-	if app.applySourceMarkdownShortcut(event) || app.completeSourceCodeFence(event) {
+	if app.applySourceMarkdownShortcut(event) || app.completeSourceCodeFence(event) || app.formattingInput(event) {
 		return true
 	}
-	return app.formattingInput(event) || app.autoIndentSourceParagraph(event)
+	if (event.Kind != mygoui.InputText && event.Kind != mygoui.InputKeyDown) || !app.sourceMarkdownTyping() {
+		return false
+	}
+	if event.Kind == mygoui.InputText {
+		return app.typeSourceMarkdown(event.Text)
+	}
+	return continueSourceMarkdownLine(app.code, event)
 }
 
 func (app *workspaceWindow) showFind(replace bool) {

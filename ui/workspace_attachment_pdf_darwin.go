@@ -57,22 +57,35 @@ func (viewer *workspacePDFWindow) mount(pdf []byte) error {
 		var off func()
 		off = win.OnShow(func() {
 			off()
-			defer nativeAutoreleasePool()()
-			page := view.Send(objc.RegisterName("document")).Send(objc.RegisterName("pageAtIndex:"), uint(0))
-			if page == 0 {
-				return
-			}
-			box := objc.Send[previewNativeRect](page, objc.RegisterName("boundsForBox:"), int64(1)) // Crop box.
-			top := previewNativePoint{X: box.Origin.X, Y: box.Origin.Y + box.Size.Height}
-			destination := objc.ID(objc.GetClass("PDFDestination")).Send(objc.RegisterName("alloc")).
-				Send(objc.RegisterName("initWithPage:atPoint:"), page, top)
-			if destination != 0 {
-				view.Send(objc.RegisterName("goToDestination:"), destination)
-				destination.Send(objc.RegisterName("release"))
+			viewer.jumpToPage = func(number int) { jumpPDFKitToPage(view, number) }
+			if !jumpPDFKitToPage(view, viewer.requestedPage) {
+				jumpPDFKitToPage(view, 1)
 			}
 		})
 	})
 	return err
+}
+
+func jumpPDFKitToPage(view objc.ID, number int) bool {
+	defer nativeAutoreleasePool()()
+	doc := view.Send(objc.RegisterName("document"))
+	if number <= 0 || uint(number) > objc.Send[uint](doc, objc.RegisterName("pageCount")) {
+		return false
+	}
+	page := doc.Send(objc.RegisterName("pageAtIndex:"), uint(number-1))
+	if page == 0 {
+		return false
+	}
+	box := objc.Send[previewNativeRect](page, objc.RegisterName("boundsForBox:"), int64(1)) // Crop box.
+	top := previewNativePoint{X: box.Origin.X, Y: box.Origin.Y + box.Size.Height}
+	destination := objc.ID(objc.GetClass("PDFDestination")).Send(objc.RegisterName("alloc")).
+		Send(objc.RegisterName("initWithPage:atPoint:"), page, top)
+	if destination == 0 {
+		return false
+	}
+	view.Send(objc.RegisterName("goToDestination:"), destination)
+	destination.Send(objc.RegisterName("release"))
+	return true
 }
 
 func zoomPDFKitView(view objc.ID, action workspacePDFZoom) {

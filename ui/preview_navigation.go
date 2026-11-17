@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 
 	"cyberwriter/internal/core/vaultindex"
@@ -15,7 +16,10 @@ import (
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
-const previewNoteScheme = "cyberwriter-note"
+const (
+	previewNoteScheme = "cyberwriter-note"
+	previewPDFScheme  = "cyberwriter-pdf"
+)
 
 func previewNoteURL(source, target, anchor string) string {
 	return previewNoteDestination(source, target, anchor, false)
@@ -48,6 +52,35 @@ func previewNoteNavigation(raw string) (relative, anchor string, currentTab, ok 
 	return relative, query.Get("anchor"), query.Get("tab") == "current", true
 }
 
+func previewPDFDestination(relative string, page int) string {
+	query := url.Values{"path": {relative}}
+	if page > 0 {
+		query.Set("page", strconv.Itoa(page))
+	}
+	return (&url.URL{Scheme: previewPDFScheme, Host: "open", RawQuery: query.Encode()}).String()
+}
+
+func previewPDFNavigation(raw string) (relative string, page int, ok bool) {
+	link, err := url.Parse(raw)
+	if err != nil || link.Scheme != previewPDFScheme || link.Host != "open" || link.User != nil ||
+		link.Path != "" && link.Path != "/" || link.Fragment != "" {
+		return "", 0, false
+	}
+	query, err := url.ParseQuery(link.RawQuery)
+	relative = query.Get("path")
+	if err != nil || len(query["path"]) != 1 || !fs.ValidPath(relative) ||
+		strings.ContainsAny(relative, "\\\x00\r\n") || !workspace.IsPDFPath(relative) {
+		return "", 0, false
+	}
+	if pages := query["page"]; len(pages) != 0 {
+		page, err = strconv.Atoi(pages[0])
+		if len(pages) != 1 || err != nil || page < 1 {
+			return "", 0, false
+		}
+	}
+	return relative, page, true
+}
+
 func (app *workspaceWindow) followPreviewAnchor(anchor string) {
 	if anchor == "" {
 		return
@@ -61,6 +94,8 @@ func (app *workspaceWindow) followPreviewAnchor(anchor string) {
 type previewResources struct {
 	index             *vaultindex.Index
 	vault             *workspace.Vault
+	wikiImages        *wikiImageNames
+	wikiPDFs          *wikiPDFIndex
 	resolveReportNote func(string) (string, bool)
 	images            map[string]string
 	remaining         int64
@@ -70,24 +105,61 @@ type previewResources struct {
 }
 
 type previewResourceOrigin struct {
-	vault *workspace.Vault
-	index *vaultindex.Index
-	note  string
+	vault      *workspace.Vault
+	index      *vaultindex.Index
+	wikiImages *wikiImageNames
+	wikiPDFs   *wikiPDFIndex
+	note       string
 }
 
 func (app *workspaceWindow) previewOrigin() previewResourceOrigin {
-	vault, index := app.vault, app.index.data
-	if app.storage != nil {
-		vault, index = app.storage, nil
+	return app.tabPreviewOrigin(app.workspaceTab)
+}
+
+func (app *workspaceWindow) tabPreviewOrigin(tab *workspaceTab) previewResourceOrigin {
+	if tab.storage != nil {
+		return previewResourceOrigin{vault: tab.storage, note: tab.document.Path}
 	}
-	return previewResourceOrigin{vault: vault, index: index, note: app.document.Path}
+	return previewResourceOrigin{vault: app.vault, index: app.index.data, wikiImages: app.index.wikiImages,
+		wikiPDFs: app.index.wikiPDFs, note: tab.document.Path}
 }
 
 func (origin previewResourceOrigin) resources() *previewResources {
 	if origin.vault == nil || origin.note == "" {
 		return nil
 	}
-	return &previewResources{vault: origin.vault, index: origin.index, remaining: 12 << 20, images: make(map[string]string)}
+	return &previewResources{vault: origin.vault, index: origin.index, wikiImages: origin.wikiImages, wikiPDFs: origin.wikiPDFs,
+		remaining: 12 << 20, images: make(map[string]string)}
+}
+
+// wikiImageNames is an immutable snapshot of the visible Vault attachments.
+// An empty value identifies a name shared by more than one attachment.
+type wikiImageNames map[string]string
+
+func (origin previewResourceOrigin) wikiImageCandidates(target string) []string {
+	if !workspace.IsRasterImagePath(target) || strings.HasPrefix(target, "/") || strings.ContainsAny(target, "\\\x00") {
+		return nil
+	}
+	nearby := path.Join(path.Dir(origin.note), target)
+	first, second := nearby, ""
+	switch {
+	case strings.HasPrefix(target, "./"), strings.HasPrefix(target, "../"):
+	case strings.ContainsRune(target, '/'):
+		// Match an explicit Vault path first, keeping the earlier same-note-folder fallback.
+		first, second = target, nearby
+	case origin.wikiImages != nil:
+		second = (*origin.wikiImages)[target]
+	default:
+		second = target
+	}
+	var candidates []string
+	if fs.ValidPath(first) {
+		candidates = append(candidates, first)
+	}
+	if second != first && fs.ValidPath(second) {
+		candidates = append(candidates, second)
+	}
+	return candidates
 }
 
 func (m *previewMarkup) rawInline(n parser.Inline) string {
@@ -144,12 +216,21 @@ func (m *previewMarkup) wikilink(link vaultindex.Wikilink) bool {
 	if m.writeSnippetLink(link) {
 		return true
 	}
+	if name, _, _ := strings.Cut(link.Target, "#"); !link.Embed && workspace.IsPDFPath(strings.TrimSpace(name)) {
+		return m.writePDFWikilink(link)
+	}
+	if link.Embed {
+		if src := m.imageSource(link.Target, true); src != "" {
+			alt := link.Label
+			if m.standalone != htmlInApp {
+				alt = link.Target
+			}
+			m.writeImage(src, alt, "", 0)
+			return true
+		}
+	}
 	if m.standalone != htmlInApp {
 		if link.Embed {
-			if src := m.imageSource(link.Target, true); src != "" {
-				m.writeImage(src, link.Target, "", 0)
-				return true
-			}
 			return false
 		}
 		target := link.Target
@@ -183,13 +264,32 @@ func (m *previewMarkup) wikilink(link vaultindex.Wikilink) bool {
 		fmt.Fprintf(&m.out, `<a class="wikilink" href="%s">%s</a>`, html.EscapeString(dest), html.EscapeString(link.Label))
 		return true
 	}
-	if link.Embed {
-		if src := m.imageSource(link.Target, true); src != "" {
-			fmt.Fprintf(&m.out, `<img src="%s" alt="%s">`, src, html.EscapeString(link.Label))
-			return true
-		}
-	}
 	return false
+}
+
+func (m *previewMarkup) writePDFWikilink(link vaultindex.Wikilink) bool {
+	relative, page, ok := m.resources.resolveWikiPDF(m.relative, link.Target)
+	if !ok {
+		return false
+	}
+	label := html.EscapeString(link.Label)
+	if m.figures != nil && m.figures.pdf {
+		// Printed PDFs use the alias as text. The export has no Vault opener.
+		m.out.WriteString(label)
+		return true
+	}
+	var dest string
+	if m.standalone == htmlInApp {
+		dest = previewPDFDestination(relative, page)
+	} else {
+		target := url.URL{Path: relative}
+		if page > 0 {
+			target.Fragment = "page=" + strconv.Itoa(page)
+		}
+		dest = target.String()
+	}
+	fmt.Fprintf(&m.out, `<a class="wikilink" href="%s">%s</a>`, html.EscapeString(dest), label)
+	return true
 }
 
 func (m *previewMarkup) embedParagraph(in []parser.Inline, anchor string) bool {
@@ -203,6 +303,9 @@ func (m *previewMarkup) embedParagraph(in []parser.Inline, anchor string) bool {
 		return false
 	}
 	link := links[0]
+	if workspace.IsRasterImagePath(link.Target) && m.imageSource(link.Target, true) != "" {
+		return false
+	}
 	relative, ok := res.index.Resolve(m.relative, link.Target)
 	if !ok || relative == m.relative {
 		return false
@@ -214,7 +317,8 @@ func (m *previewMarkup) embedParagraph(in []parser.Inline, anchor string) bool {
 	res.embeds++
 	if m.standalone != htmlInApp {
 		child := previewMarkup{doc: parser.New(m.doc.Extensions()), resources: res, relative: relative, embedded: true,
-			charts: m.charts, figures: m.figures, standalone: m.standalone, htmlBlocks: m.htmlBlocks, codeTheme: m.codeTheme}
+			charts: m.charts, figures: m.figures, standalone: m.standalone, htmlBlocks: m.htmlBlocks, codeTheme: m.codeTheme,
+			calloutStyles: m.calloutStyles}
 		body, _ := child.render(doc.Text, "", true)
 		body = child.fillWikiFigures(body)
 		fmt.Fprintf(&m.out, `<div class="embed-note"%s><header>%s</header>%s</div>`, anchor, html.EscapeString(link.Target), body)
@@ -222,7 +326,7 @@ func (m *previewMarkup) embedParagraph(in []parser.Inline, anchor string) bool {
 	}
 	_, _, body := workspace.SplitFrontmatter(doc.Text)
 	child := previewMarkup{doc: parser.New(m.doc.Extensions()), resources: res, relative: relative, embedded: true,
-		charts: m.charts, figures: m.figures, codeTheme: m.codeTheme, codeCopies: m.codeCopies}
+		charts: m.charts, figures: m.figures, codeTheme: m.codeTheme, codeCopies: m.codeCopies, calloutStyles: m.calloutStyles}
 	setPreviewDocument(child.doc, body)
 	child.blocks(0)
 	fmt.Fprintf(&m.out, `<aside class="note-embed"%s>`, anchor)
@@ -239,7 +343,8 @@ func (m *previewMarkup) imageSource(destination string, wiki bool) string {
 	}
 	var candidates []string
 	if wiki {
-		candidates = append(candidates, path.Join(path.Dir(m.relative), destination), destination)
+		origin := previewResourceOrigin{note: m.relative, wikiImages: res.wikiImages}
+		candidates = origin.wikiImageCandidates(destination)
 	} else {
 		relative, ok := workspace.ResolveImagePath(m.relative, destination)
 		if !ok {
@@ -248,11 +353,6 @@ func (m *previewMarkup) imageSource(destination string, wiki bool) string {
 		candidates = append(candidates, relative)
 	}
 	for _, relative := range candidates {
-		switch strings.ToLower(path.Ext(relative)) {
-		case ".png", ".jpg", ".jpeg", ".gif", ".webp":
-		default:
-			continue
-		}
 		if cached, exists := res.images[relative]; exists {
 			if cached != "" {
 				return cached

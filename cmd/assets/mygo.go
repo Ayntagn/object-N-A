@@ -18,11 +18,16 @@ const (
 	mygoModule  = "github.com/egoist/mygo"
 	mygoVersion = "v0.8.3"
 	mygoSum     = "h1:aTLEhS221YhsX+gKGNLQ5xEKMLCcYYr3pH9AkTwIRs4="
-	mygoDir     = "third_party/mygo-167"
+	mygoDir     = "third_party/mygo-176"
 )
 
-//go:embed mygo/LICENSE mygo/ui/editor/*.go.txt
+//go:embed mygo/LICENSE mygo
 var mygoOverlay embed.FS
+
+type mygoFile struct {
+	name string
+	data []byte
+}
 
 func restoreMyGo(root *os.Root) error {
 	if err := prepareDirectory(root, "third_party"); err != nil {
@@ -63,9 +68,9 @@ func restoreMyGo(root *os.Root) error {
 	if err := os.CopyFS(stage, os.DirFS(download.Dir)); err != nil {
 		return fmt.Errorf("copy the verified MyGo source: %w", err)
 	}
-	for name, data := range files {
-		if err := os.WriteFile(filepath.Join(stage, filepath.FromSlash(name)), data, 0o644); err != nil {
-			return fmt.Errorf("apply MyGo file %s: %w", name, err)
+	for _, file := range files {
+		if err := os.WriteFile(filepath.Join(stage, filepath.FromSlash(file.name)), file.data, 0o644); err != nil {
+			return fmt.Errorf("apply MyGo file %s: %w", file.name, err)
 		}
 	}
 	// Publish the complete module in one rename. Another invocation may
@@ -77,34 +82,38 @@ func restoreMyGo(root *os.Root) error {
 	return nil
 }
 
-func mygoOverlayFiles() (map[string][]byte, error) {
-	const editorDir = "mygo/ui/editor"
-	entries, err := mygoOverlay.ReadDir(editorDir)
-	if err != nil {
-		return nil, err
+func mygoOverlayFiles() ([]mygoFile, error) {
+	files := []mygoFile{
+		{name: ".object-na-source", data: []byte(mygoModule + " " + mygoVersion + " " + mygoSum + "\n")},
 	}
-	license, err := mygoOverlay.ReadFile("mygo/LICENSE")
-	if err != nil {
-		return nil, err
-	}
-	files := map[string][]byte{
-		"LICENSE":           license,
-		".object-na-source": []byte(mygoModule + " " + mygoVersion + " " + mygoSum + "\n"),
-	}
-	for _, entry := range entries {
-		data, err := mygoOverlay.ReadFile(path.Join(editorDir, entry.Name()))
+	err := fs.WalkDir(mygoOverlay, "mygo", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			return nil, err
+			return err
 		}
-		files[path.Join("ui/editor", strings.TrimSuffix(entry.Name(), ".txt"))] = data
-	}
-	return files, nil
+		if entry.IsDir() {
+			return nil
+		}
+		relative := strings.TrimPrefix(name, "mygo/")
+		if relative != "LICENSE" {
+			if !strings.HasSuffix(relative, ".go.txt") {
+				return fmt.Errorf("unexpected MyGo overlay file %s", relative)
+			}
+			relative = strings.TrimSuffix(relative, ".txt")
+		}
+		data, err := mygoOverlay.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		files = append(files, mygoFile{name: relative, data: data})
+		return nil
+	})
+	return files, err
 }
 
-func matchesMyGo(root *os.Root, files map[string][]byte) bool {
-	for name, want := range files {
-		data, err := root.ReadFile(path.Join(mygoDir, name))
-		if err != nil || !bytes.Equal(data, want) {
+func matchesMyGo(root *os.Root, files []mygoFile) bool {
+	for _, file := range files {
+		data, err := root.ReadFile(path.Join(mygoDir, file.name))
+		if err != nil || !bytes.Equal(data, file.data) {
 			return false
 		}
 	}

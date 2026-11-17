@@ -66,6 +66,9 @@ func Open(root string) (*Vault, error) {
 	return &Vault{root: opened, indexedNoteDevice: indexedNoteCacheDevice(opened)}, nil
 }
 
+// RootPath is the absolute directory used to open this Vault.
+func (v *Vault) RootPath() string { return v.root.Name() }
+
 func (v *Vault) Close() error {
 	v.writes.Lock()
 	defer v.writes.Unlock()

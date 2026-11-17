@@ -14,6 +14,8 @@ import (
 
 type workspaceIndex struct {
 	data        *vaultindex.Index
+	wikiImages  *wikiImageNames
+	wikiPDFs    *wikiPDFIndex
 	attachment  uint64
 	generation  uint64
 	building    bool

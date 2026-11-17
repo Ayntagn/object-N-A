@@ -3,6 +3,7 @@ package editor
 import (
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -286,6 +287,18 @@ func (st *State) Select(start, end int) { st.SetSelections(Selection{Anchor: sta
 // Cursor returns the offset of the newest caret.
 func (st *State) Cursor() int { return st.Selection().Head }
 
+// OffsetAtPoint returns the buffer byte offset of the caret nearest to
+// (x, y) in local DIPs, once the editor has been laid out.
+func (st *State) OffsetAtPoint(x, y float32) (int, bool) {
+	ed := &st.ed
+	if ed.buf() == nil || ed.buf() != st.Buffer || ed.r.W <= 0 || ed.r.H <= 0 {
+		return 0, false
+	}
+	ed.sync()
+	cx, cy := ed.toContent(x, y)
+	return ed.offsetAt(cx, cy), true
+}
+
 // CursorPos returns the line and column of the newest caret.
 func (st *State) CursorPos() Pos {
 	st.ensure()
@@ -302,6 +315,39 @@ func (st *State) SelectedText() string {
 func (st *State) Insert(text string) {
 	st.ensure()
 	st.ed.retry(func() bool { st.ed.paste(text); return true })
+}
+
+// InsertAt inserts text at a buffer byte offset and puts one caret after
+// it. The previous selections are part of the edit's undo record.
+func (st *State) InsertAt(offset int, text string) bool {
+	if text == "" || !utf8.ValidString(text) {
+		return false
+	}
+	st.ensure()
+	ed := &st.ed
+	return ed.retry(func() bool {
+		length := ed.view.text.Len()
+		if offset < 0 || offset > length || offset < length && !utf8.RuneStart(ed.view.text.ByteAt(offset)) {
+			return false
+		}
+		ed.endGroup()
+		return ed.apply([]Edit{{Start: offset, End: offset, Text: text}}, editOther, func(move func(int, bias) int) []sel {
+			end := move(offset, biasRight)
+			return []sel{ed.newSel(end, end)}
+		})
+	})
+}
+
+// ReplaceTextInput takes the place of a typed or composed input. The range is
+// in UTF-16 units, or nil for the marked text or selections. Caret is a byte
+// offset in the replacement. The edit and caret share the input's undo record.
+func (st *State) ReplaceTextInput(r *ui.TextInputRange, text string, caret int) {
+	st.ensure()
+	st.ed.finishEndedComposition(r)
+	st.ed.retry(func() bool {
+		st.ed.replaceText(r, text, caret)
+		return true
+	})
 }
 
 // Run runs a command as its key would, and reports whether it did

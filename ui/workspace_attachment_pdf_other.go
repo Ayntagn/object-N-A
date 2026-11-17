@@ -112,6 +112,14 @@ func (viewer *workspacePDFWindow) mount(data []byte) error {
 		}
 		page.OnPageTitleUpdated(func(e *mygo.TitleEvent) { e.PreventDefault() })
 		page.OnWillNavigate(func(e *mygo.NavigateEvent) { e.PreventDefault() })
+		page.OnDOMReady(func() {
+			viewer.jumpToPage = func(number int) {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				_, _ = page.EvalContext(ctx, fmt.Sprintf("window.attachmentPDFPage = %d; window.scrollAttachmentPDFPage?.()", number))
+			}
+			viewer.requestPage(viewer.requestedPage)
+		})
 		if err = page.LoadFile(filename); err == nil {
 			win.OnClosed(cleanup)
 			viewer.zoom = func(action workspacePDFZoom) {

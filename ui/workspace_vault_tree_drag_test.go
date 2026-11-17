@@ -1,4 +1,4 @@
-// spec: FEAT-001 / Vault Files custom order by dragging siblings.
+// spec: FEAT-001 / EV-MYGO-179, EV-MYGO-288.
 package ui
 
 import (
@@ -46,7 +46,7 @@ func TestVaultTreeDragReordersSiblings(t *testing.T) {
 	drag("Alpha", "Outside", .25, false)
 	requireVaultDragOrder(t, view, "Zulu", "Alpha", "Beta", folder, "Nested", "Outside")
 	if _, err := os.Stat(filepath.Join(root, "Content", "Alpha.md")); err != nil {
-		t.Fatalf("cross-directory drop moved the note: %v", err)
+		t.Fatalf("dropping onto a file in another folder moved the note: %v", err)
 	}
 }
 
@@ -105,6 +105,68 @@ func TestVaultTreeDragReordersNestedFolders(t *testing.T) {
 		if err != nil || string(got) != "# "+name+"\n" {
 			t.Fatalf("folder drag changed %q: %q, %v", name, got, err)
 		}
+	}
+}
+
+func TestVaultTreeDragMovesFilesIntoFoldersAndRoot(t *testing.T) {
+	t.Setenv("CYBERWRITER_CONFIG_DIR", t.TempDir())
+	app, view, filename := snippetsWorkspace(t, "Root.md", "# Root\n", splitMode)
+	root := filepath.Dir(filename)
+	for _, folder := range []string{"Archive", "Content/Empty"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(folder)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const source, archived, moved = "Content/Draft.md", "Archive/Draft.md", "Content/Empty/Draft.md"
+	const draft, archive = "# Working Draft\n", "# Archived Draft\n"
+	for path, content := range map[string]string{source: draft, archived: archive} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(path)), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vault, err := workspace.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = vault.Close() })
+	mountVaultDragTree(t, app, view, vault, root, "Content")
+	checkFile := func(path, want string) {
+		t.Helper()
+		got, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+		if want == "" && os.IsNotExist(err) {
+			return
+		}
+		if err != nil || want == "" || string(got) != want {
+			t.Fatalf("%s = %q, %v; wanted %q (empty means absent)", path, got, err, want)
+		}
+	}
+	dragVaultTreeRows(t, view, "Draft", "Archive, 1", 32, .5, false)
+	if app.problem == "" {
+		t.Fatal("drop on the folder containing a same-named file did not report a conflict")
+	}
+	checkFile(source, draft)
+	checkFile(archived, archive)
+	dragVaultTreeRows(t, view, "Draft", "Empty, 0", 32, .1, false)
+	requireVaultDragOrder(t, view, "Draft", "Empty, 0")
+	checkFile(source, draft)
+	dragVaultTreeRows(t, view, "Draft", "Empty, 0", 32, .5, false)
+	checkFile(moved, draft)
+	checkFile(source, "")
+	requireVaultDragOrder(t, view, "Empty, 1", "Draft")
+
+	from := vaultDragRowBounds(t, view, "Draft")
+	heading, found := view.AccessByRole(mygoui.RoleHeading, filepath.Base(root))
+	if !found {
+		t.Fatal("missing Vault heading")
+	}
+	x, y := heading.Bounds.X+heading.Bounds.W/2, heading.Bounds.Y+heading.Bounds.H/2
+	view.Press(from.X+32, from.Y+from.H/2)
+	view.Move(x, y)
+	view.Release(x, y)
+	checkFile("Draft.md", draft)
+	checkFile(moved, "")
+	if app.document.Path != "Root.md" {
+		t.Fatalf("file drag changed open document to %q", app.document.Path)
 	}
 }
 

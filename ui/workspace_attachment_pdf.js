@@ -110,6 +110,12 @@ function resizePages() {
   }, 80);
 }
 
+window.scrollAttachmentPDFPage = () => {
+  const number = window.attachmentPDFPage;
+  if (closed || !Number.isSafeInteger(number) || number <= 0) return;
+  pages.children[number - 1]?.scrollIntoView({ block: "start", inline: "nearest" });
+};
+
 window.adjustAttachmentPDFZoom = action => {
   if (closed || !fitSpreadWidth) return;
   const scale = manualScale ?? pages.clientWidth / fitSpreadWidth;
@@ -207,6 +213,7 @@ try {
       fragment.append(element);
     }
     pages.append(fragment);
+    window.scrollAttachmentPDFPage();
     pages.removeAttribute("aria-busy");
     status.remove();
     pages.focus({ preventScroll: true });

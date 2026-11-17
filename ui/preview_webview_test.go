@@ -66,6 +66,16 @@ func TestPreviewPreservesFormulaBoundaries(t *testing.T) {
 	}
 }
 
+// spec: FEAT-001 / EV-MYGO-287
+func TestPreviewRendersDigitLeadingInlineMath(t *testing.T) {
+	source := `价格 $5 和 $12.00。符号 $ 单独出现。指数例子 $2^{n-1}$  随后有负数 $-N$，再写 $\bar{N}=(2^{n}-1)-N$。系数 $2$，小数 $123.45$。`
+	body, _ := renderPreview(parser.New(webPreviewExtensions), source, "Formula boundaries")
+	want := `价格 $5 和 $12.00。符号 $ 单独出现。指数例子 <span class="math-inline">2^{n-1}</span>  随后有负数 <span class="math-inline">-N</span>，再写 <span class="math-inline">\bar{N}=(2^{n}-1)-N</span>。系数 <span class="math-inline">2</span>，小数 <span class="math-inline">123.45</span>。`
+	if !strings.Contains(body, want) {
+		t.Fatalf("preview = %s, want %s", body, want)
+	}
+}
+
 // spec: FEAT-001 / EV-UI-047
 func TestPreviewRecognizesMermaidFences(t *testing.T) {
 	source := "```MERMAID\nflowchart LR\n  A[开始] --> B[结束]\n```\n\n" +

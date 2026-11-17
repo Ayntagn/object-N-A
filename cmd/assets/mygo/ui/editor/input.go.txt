@@ -654,7 +654,7 @@ func (ed *editor) ReplaceText(r *ui.TextInputRange, s string) {
 	if !ed.markedActive && !continued && ed.atSelection(r) && ed.offer(ui.InputEvent{Kind: ui.InputText, Text: s}) {
 		return
 	}
-	ed.retry(func() bool { ed.replaceText(r, s); return true })
+	ed.retry(func() bool { ed.replaceText(r, s, -1); return true })
 }
 
 // atSelection reports whether an input method's range is the newest
@@ -669,17 +669,21 @@ func (ed *editor) atSelection(r *ui.TextInputRange) bool {
 	return t.FromUTF16(min(r.Start, r.End)) == p.start() && t.FromUTF16(max(r.Start, r.End)) == p.end()
 }
 
-func (ed *editor) replaceText(r *ui.TextInputRange, s string) {
+func (ed *editor) replaceText(r *ui.TextInputRange, s string, caret int) {
 	if ed.o.readOnly {
 		return
 	}
-	if r == nil && !ed.markedActive {
+	if r == nil && !ed.markedActive && caret < 0 {
 		ed.insert(s)
 		return
 	}
 	ts := ed.targets(r)
 	ed.markedActive, ed.marked = false, nil
-	ed.replaceRanges(ts, s, editCompose, -1, -1)
+	if caret >= 0 {
+		caret = len(lf(s[:min(caret, len(s))]))
+		s = lf(s)
+	}
+	ed.replaceRanges(ts, s, editCompose, caret, caret)
 	if b := ed.buf(); b != nil {
 		b.endGroup()
 	}

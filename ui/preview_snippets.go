@@ -144,7 +144,7 @@ func (m *previewMarkup) writeSnippetHoverTemplates() {
 
 func (m *previewMarkup) writeSnippetContent(item snippets.Snippet) {
 	language := strings.TrimSpace(item.Language)
-	child := previewMarkup{codeTheme: m.snippets.codeTheme, embedded: true}
+	child := previewMarkup{codeTheme: m.snippets.codeTheme, embedded: true, calloutStyles: m.calloutStyles}
 	if language == "" || strings.EqualFold(language, "markdown") {
 		child.doc = parser.New(previewExtensions)
 		body, _ := child.render(item.Content, "", false)

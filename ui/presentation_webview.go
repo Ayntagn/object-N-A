@@ -78,6 +78,15 @@ func (w *presentationWeb) init(app *workspaceWindow, p *workspacePresentation) {
 		if !e.UserInitiated {
 			return
 		}
+		if relative, pdfPage, ok := previewPDFNavigation(e.URL); ok {
+			app.win.Update(func() {
+				if app.presentation == p && app.workspaceTab == p.tab && app.previewOrigin().vault == p.origin.vault {
+					app.closePresentation()
+					app.openVaultPDFAt(p.origin.vault, relative, pdfPage)
+				}
+			})
+			return
+		}
 		if relative, anchor, _, ok := previewNoteNavigation(e.URL); ok {
 			app.win.Update(func() {
 				if app.presentation == p {

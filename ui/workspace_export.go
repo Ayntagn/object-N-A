@@ -120,18 +120,19 @@ var exportFormats = [...]struct{ label, extension, action string }{
 }
 
 type exportDocument struct {
-	source, name  string
-	theme         string
-	customCSS     string
-	editorFont    string
-	hasEditorFont bool // An empty editorFont explicitly selects System Mono.
-	layout        exportdoc.Layout
-	pagination    exportdoc.PDFPagination
-	appearance    pdfAppearance
-	numberFigures bool
-	paper         string
-	origin        previewResourceOrigin
-	kind          documentType
+	source, name         string
+	theme                string
+	customCSS            string
+	calloutStyleSnapshot string
+	editorFont           string
+	hasEditorFont        bool // An empty editorFont explicitly selects System Mono.
+	layout               exportdoc.Layout
+	pagination           exportdoc.PDFPagination
+	appearance           pdfAppearance
+	numberFigures        bool
+	paper                string
+	origin               previewResourceOrigin
+	kind                 documentType
 }
 
 type workspaceExportSheet struct {
@@ -286,7 +287,8 @@ func (app *workspaceWindow) exportDocument(layout exportdoc.Layout) exportDocume
 	}
 	return exportDocument{source: app.workingText(), name: name, layout: layout, origin: app.previewOrigin(),
 		kind: kind, theme: app.resolvePreviewTheme(app.previewThemeSelection()).ID, customCSS: customCSS,
-		numberFigures: app.preferences.NumberFigures, editorFont: app.preferences.EditorFont, hasEditorFont: true}
+		calloutStyleSnapshot: app.previewPane.snapshotCalloutStyles(app.calloutStyles()),
+		numberFigures:        app.preferences.NumberFigures, editorFont: app.preferences.EditorFont, hasEditorFont: true}
 }
 
 func (app *workspaceWindow) exportDirectory() string {

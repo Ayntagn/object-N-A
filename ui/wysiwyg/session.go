@@ -32,7 +32,7 @@ type Session struct {
 	tables           []tableRegion
 	tableProjection  string
 	visualTables     []*Table
-	wikilinks        map[string]string
+	wikilinks        map[string]visualWikilink
 	pageBreak        *richtext.Attachment
 }
 
@@ -155,12 +155,12 @@ func (s *Session) InsertMarkdownAt(start, end int, source string) bool {
 	return true
 }
 
-func projectMarkdown(parsed *parser.Document, source string, formulas map[string]*Formula, images map[string]*Image) (richtext.Text, string, bool) {
+func projectMarkdown(parsed *parser.Document, source string, formulas map[string]*Formula, images map[string]*Image, calloutBody bool) (richtext.Text, string, bool) {
 	projected, highlights := projectHighlights(parsed)
 	if !supported(projected, formulas, images) {
 		return richtext.Text{}, "", false
 	}
-	visual := richtext.ParseMarkdown(projected.Source())
+	visual := richtext.ParseMarkdownDocument(projected, quoteSoftBreaks(projected, calloutBody))
 	if projected != parsed {
 		var ok bool
 		visual, ok = applyHighlightDelimiters(visual, highlights)
@@ -290,7 +290,7 @@ func (s *Session) readDraftTables() {
 	s.tables = readTableRegions(parsed, len(prefix))
 }
 
-func (s *Session) rememberWikilinks(links map[string]string) {
+func (s *Session) rememberWikilinks(links map[string]visualWikilink) {
 	if s.wikilinks == nil {
 		s.wikilinks = links
 	} else {
