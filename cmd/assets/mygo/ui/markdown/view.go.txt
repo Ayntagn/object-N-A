@@ -96,6 +96,12 @@ type Options struct {
 	// Block, when set, is asked first for each block, and builds it in
 	// its place when it returns true.
 	Block func(c *ui.Context, d *parser.Document, i int) bool
+	// Disclosure groups consecutive siblings behind a label. The queried
+	// block and the closing block are consumed by the disclosure.
+	Disclosure func(d *parser.Document, i int) (Disclosure, bool)
+	// CopySource supplies the Markdown to copy when the view uses a
+	// presentation-only projection with the same source byte offsets.
+	CopySource string
 	// Callout presents a quote with a distinct first-line header. HeaderEnd
 	// is the source offset of the end of the consumed line.
 	Callout func(d *parser.Document, quote int) (Callout, bool)
@@ -337,12 +343,18 @@ func (st *viewState) blocks(c *ui.Context, parent int, tight bool, base spanStyl
 }
 
 func (st *viewState) blocksAfter(c *ui.Context, parent int, tight bool, base spanStyle, after int) {
+	st.blocksBetween(c, parent+1, st.doc.Block(parent).Next, tight, base, after)
+}
+
+func (st *viewState) blocksBetween(c *ui.Context, start, end int, tight bool, base spanStyle, after int) {
 	d := st.doc
 	th := &st.th
 	first := true
 	prevHeading := 0
-	for j := parent + 1; j < d.Block(parent).Next; j = d.Block(j).Next {
+	for next := start; next < end; {
+		j := next
 		b := d.Block(j)
+		next = b.Next
 		if after > 0 && b.End <= after || b.Kind == parser.FootnoteDefinition || b.Kind == parser.Paragraph && d.LineCount(j) == 0 {
 			// Footnotes show at the end, and an alert's marker not at all.
 			continue
@@ -360,7 +372,17 @@ func (st *viewState) blocksAfter(c *ui.Context, parent int, tight bool, base spa
 				top = max(top, th.em(th.Headings[b.Level-1].Top))
 			}
 		}
-		el := st.block(c, j, tight, base)
+		var el ui.Element
+		if st.o.Disclosure != nil {
+			group, ok := st.o.Disclosure(d, j)
+			if ok && group.Close > j && group.Close < end && d.Block(group.Close).Parent == b.Parent {
+				el = st.disclosure(c, j, group, tight, base)
+				next = d.Block(group.Close).Next
+			}
+		}
+		if !el.Valid() {
+			el = st.block(c, j, tight, base)
+		}
 		st.fadeIn(el, b)
 		if top > 0 {
 			el.Margin(top, 0, 0, 0)
@@ -375,6 +397,30 @@ func (st *viewState) blocksAfter(c *ui.Context, parent int, tight bool, base spa
 		}
 		first = false
 	}
+}
+
+// Disclosure describes the siblings between a block and Close, the index of
+// the closing block. Title is the accessible label of the control.
+type Disclosure struct {
+	Title string
+	Close int
+	Open  bool
+}
+
+func (st *viewState) disclosure(c *ui.Context, i int, group Disclosure, tight bool, base spanStyle) ui.Element {
+	box := ui.Column(c.Key(struct {
+		index int
+		title string
+	}{i, group.Title})).FillWidth()
+	open := ui.Local(box, group.Open, func() bool { return group.Open })
+	if st.scrollTo > i && st.scrollTo < group.Close {
+		*open = true
+	}
+	return box.Children(func() {
+		ui.Collapsible(c, group.Title, open, func() {
+			st.blocksBetween(c, st.doc.Block(i).Next, group.Close, tight, base, 0)
+		})
+	})
 }
 
 // block builds block i.

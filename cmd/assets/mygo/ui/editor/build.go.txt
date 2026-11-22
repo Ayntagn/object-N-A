@@ -3,10 +3,10 @@ package editor
 import (
 	"slices"
 	"time"
-	"unicode/utf8"
 
 	"github.com/egoist/mygo/internal/l10n"
 	"github.com/egoist/mygo/internal/platform"
+	"github.com/egoist/mygo/internal/rope"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -202,8 +202,14 @@ func (ed *editor) accessibility(n *platform.AccessNode) {
 	}
 	n.Value = r.String()
 	p := ed.primary()
-	n.SelStart = utf8.RuneCountInString(n.Value[:min(p.start(), len(n.Value))])
-	n.SelEnd = n.SelStart + utf8.RuneCountInString(n.Value[min(p.start(), len(n.Value)):min(p.end(), len(n.Value))])
+	root := r.Root()
+	start := rope.Prefix(root, p.start())
+	end := start
+	if !p.empty() {
+		end = rope.Prefix(root, p.end())
+	}
+	n.SelStart, n.SelEnd = start.Runes, end.Runes
+	n.TextUTF16 = &platform.AccessTextUTF16{Length: rope.Sum(root).Units, Start: start.Units, End: end.Units}
 	if n.Placeholder == "" {
 		n.Placeholder = ed.o.placeholder
 	}
@@ -227,7 +233,8 @@ func (ed *editor) menu(m *ui.Menu) {
 	if m.Item(tx.Copy()).Shortcut(ui.Cmd, ui.KeyC).Chosen() {
 		ed.run(Copy)
 	}
-	if m.Item(tx.Paste()).Shortcut(ui.Cmd, ui.KeyV).Disabled(ro).Chosen() {
+	if m.Item(tx.Paste()).Shortcut(ui.Cmd, ui.KeyV).Disabled(ro).Chosen() &&
+		!ed.offer(ui.InputEvent{Kind: ui.InputCommand, Text: "paste"}) {
 		ed.run(Paste)
 	}
 	m.Separator()

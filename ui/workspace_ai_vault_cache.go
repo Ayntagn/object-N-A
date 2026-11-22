@@ -1,13 +1,16 @@
 package ui
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"cyberwriter/internal/core/vaultcontext"
@@ -39,7 +42,15 @@ func readAIVaultContextCache(root string) (aiVaultContextCache, error) {
 	if err != nil {
 		return aiVaultContextCache{}, err
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(aiVaultPackedPath(path))
+	if err == nil {
+		defer f.Close()
+		return readAIVaultPacked(f)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return aiVaultContextCache{}, err
+	}
+	f, err = os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return aiVaultContextCache{}, nil
 	}
@@ -55,6 +66,55 @@ func readAIVaultContextCache(root string) (aiVaultContextCache, error) {
 		return aiVaultContextCache{}, errors.New("invalid Vault index")
 	}
 	return cache, nil
+}
+
+const aiVaultPackedHeader = "ONACACHE\x01"
+
+func aiVaultPackedPath(jsonPath string) string {
+	return strings.TrimSuffix(jsonPath, ".json") + ".bin"
+}
+
+func readAIVaultPacked(src io.Reader) (aiVaultContextCache, error) {
+	var magic [len(aiVaultPackedHeader)]byte
+	if _, err := io.ReadFull(src, magic[:]); err != nil {
+		return aiVaultContextCache{}, err
+	}
+	if string(magic[:]) != aiVaultPackedHeader {
+		return aiVaultContextCache{}, errors.New("invalid Vault cache header")
+	}
+	decoder := json.NewDecoder(src)
+	var cache aiVaultContextCache
+	if err := decoder.Decode(&cache); err != nil {
+		return aiVaultContextCache{}, err
+	}
+	reader := bufio.NewReader(io.MultiReader(decoder.Buffered(), src))
+	if newline, err := reader.ReadByte(); err != nil || newline != '\n' {
+		return aiVaultContextCache{}, errors.New("invalid Vault cache metadata")
+	}
+	index, err := vaultcontext.ReadPacked(reader)
+	if err != nil {
+		return aiVaultContextCache{}, err
+	}
+	if _, err := reader.Peek(1); err != io.EOF {
+		return aiVaultContextCache{}, errors.New("invalid Vault cache trailer")
+	}
+	cache.Index = index
+	return cache, nil
+}
+
+func writeAIVaultPacked(dst io.Writer, cache aiVaultContextCache) error {
+	index := cache.Index
+	if index == nil {
+		return errors.New("missing Vault index")
+	}
+	cache.Index = nil
+	if _, err := io.WriteString(dst, aiVaultPackedHeader); err != nil {
+		return err
+	}
+	if err := json.NewEncoder(dst).Encode(cache); err != nil {
+		return err
+	}
+	return index.WritePacked(dst)
 }
 
 // Profiles before canonical Vault keys may contain a cache for this particular
@@ -122,11 +182,18 @@ func clearAIVaultContextCache(root string, files map[string]aiVaultFileStamp, le
 		if err != nil {
 			return err
 		}
-		if err := removeAIVaultContextCacheFile(cache); err != nil {
+		if err := removeAIVaultContextCachePair(cache); err != nil {
 			return err
 		}
 	}
-	return removeAIVaultContextCacheFile(file)
+	return removeAIVaultContextCachePair(file)
+}
+
+func removeAIVaultContextCachePair(jsonPath string) error {
+	if err := removeAIVaultContextCacheFile(jsonPath); err != nil {
+		return err
+	}
+	return removeAIVaultContextCacheFile(aiVaultPackedPath(jsonPath))
 }
 
 func removeAIVaultContextCacheFile(file string) error {
@@ -153,6 +220,7 @@ func stageAIVaultContextCache(root string, cache aiVaultContextCache) (target, s
 	if err != nil {
 		return "", "", err
 	}
+	target = aiVaultPackedPath(target)
 	dir := filepath.Dir(target)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err
@@ -161,7 +229,7 @@ func stageAIVaultContextCache(root string, cache aiVaultContextCache) (target, s
 	if err != nil {
 		return "", "", err
 	}
-	if err := errors.Join(json.NewEncoder(f).Encode(cache), f.Close()); err != nil {
+	if err := errors.Join(writeAIVaultPacked(f, cache), f.Close()); err != nil {
 		_ = os.Remove(f.Name())
 		return "", "", err
 	}

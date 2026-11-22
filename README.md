@@ -1,5 +1,7 @@
 # object-N/A
 
+<img src="ui/app_icon.png" width="112" height="112" alt="object-N/A 应用图标">
+
 **一个基于 Go 和 MyGo 构建的本地 Markdown 工作区。**
 
 object-N/A 是一款面向本地文件的 Markdown 桌面应用。它将笔记管理、文档编辑、实时预览和知识图谱整合在一个简洁的工作区中，让你能够在熟悉的文件系统中自由组织和管理自己的文档。
@@ -19,6 +21,20 @@ object-N/A 是一款面向本地文件的 Markdown 桌面应用。它将笔记�
 - **PDF 阅读与导出**都可在工作区完成。Markdown 生成的 PDF 按语言高亮代码块。
 - **双语界面**：支持简体中文和 English，语言设置会在重启后保留。
 
+## 与 Obsidian 的性能对比
+
+Apple M5、24 GiB 内存、macOS 27.0.1。两款应用打开相同的 4,501 篇笔记的合成 Vault，在同一篇约 119 KiB 的 Markdown 上回放分栏编辑。表中为三组交替运行的中位数。内存包含主进程及 WebKit 或 Electron 辅助进程，CPU 以单个核心为 100%。
+
+| 指标 | object-N/A v0.4.0 | Obsidian 1.15.1 |
+| --- | ---: | ---: |
+| 空闲物理内存 | 331.5 MiB | 492.4 MiB |
+| 空闲平均 CPU | 1.16% | 2.09% |
+| 编辑阶段物理内存 | 386.6 MiB | 567.2 MiB |
+| 编辑阶段物理内存采样峰值 | 426.3 MiB | 629.6 MiB |
+| 编辑阶段平均 CPU | 17.90% | 24.47% |
+
+逐轮内存、CPU、首次笔记窗口时间和测试设置可在测量记录中查看。 [测量方法与逐轮数据](docs/PERFORMANCE.md)
+
 ## 界面与工作区
 
 object-N/A 以 Vault 作为工作区单位。你可以选择已有的笔记目录，也可以创建一个新的 Vault。
@@ -26,6 +42,8 @@ object-N/A 以 Vault 作为工作区单位。你可以选择已有的笔记目�
 应用将文件浏览、文档编辑和内容预览整合在一起，尽量减少在不同工具和窗口之间切换的需要。
 
 ## 快速开始
+
+发布页提供 macOS arm64、Windows amd64 和 Linux amd64 的下载包及 SHA-256 校验和。也可以按下文从源码构建。 [下载 v0.4.0](https://github.com/Ayntagn/object-N-A/releases/tag/v0.4.0)
 
 ### 环境要求
 
@@ -44,7 +62,7 @@ object-N/A 以 Vault 作为工作区单位。你可以选择已有的笔记目�
 克隆仓库：
 
 ```bash
-git clone --branch v0.3.0 --depth 1 https://github.com/Ayntagn/object-N-A.git
+git clone --branch v0.4.0 --depth 1 https://github.com/Ayntagn/object-N-A.git
 cd object-N-A
 ```
 

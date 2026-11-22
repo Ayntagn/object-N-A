@@ -18,26 +18,51 @@ func (app *workspaceWindow) acceptsNoteImages(tab *workspaceTab) bool {
 		(!tab.documentType.overridden || tab.documentType.kind == documentMarkdown)
 }
 
-func imagePasteCommand(event mygoui.InputEvent) bool {
+func notePasteCommand(event mygoui.InputEvent) bool {
 	return event.Kind == mygoui.InputCommand && event.Text == "paste" ||
 		event.Kind == mygoui.InputKeyDown && event.Mods == mygoui.Cmd && event.Key == mygoui.KeyV
 }
 
-func (app *workspaceWindow) pasteSourceImage(tab *workspaceTab, services mygoui.Services) bool {
+func (app *workspaceWindow) pasteSourceNote(tab *workspaceTab, services mygoui.Services) bool {
 	if tab.code.ReadOnly || !app.acceptsNoteImages(tab) {
 		return false
 	}
 	markdown, handled := app.clipboardImageMarkdown(tab, services)
-	if markdown != "" {
-		selections := tab.code.Selections()
-		if len(selections) == 1 {
-			selection := selections[0]
-			markdown = sourceImageBlock(tab.draft.Snapshot(), selection.Start(), selection.End(), markdown)
-		}
-		tab.code.Insert(markdown)
-		app.selectMultiFileTile(tab)
+	if handled && markdown == "" {
+		return true
 	}
-	return handled
+	selections := tab.code.Selections()
+	if len(selections) == 1 {
+		snapshot := tab.draft.Snapshot()
+		start, end := selections[0].Start(), selections[0].End()
+		if handled {
+			markdown = sourceBlockAtSelection(snapshot, start, end, markdown)
+		} else {
+			clipboard := readNotePasteText(services)
+			markdown = clipboard.plain
+			if (clipboard.kind == blockNotePaste || clipboard.format != transfer.Text) && sourceAllowsBlockPaste(snapshot, start, end) {
+				markdown = clipboard.markdown
+				if table, ok := pasteMarkdownTable(markdown); ok {
+					markdown = table
+				}
+				if clipboard.kind == blockNotePaste {
+					markdown = sourceBlockAtSelection(snapshot, start, end, markdown)
+				}
+			}
+			if app.autoIndentParagraphs() {
+				markdown = indentPastedSource(snapshot, start, end, markdown)
+			}
+			if markdown == clipboard.plain {
+				return false
+			}
+		}
+	}
+	if markdown == "" {
+		return false
+	}
+	tab.code.Insert(markdown)
+	app.selectMultiFileTile(tab)
+	return true
 }
 
 func (w *workspaceWYSIWYG) pasteVisualImage(app *workspaceWindow, services mygoui.Services, start, end int) bool {

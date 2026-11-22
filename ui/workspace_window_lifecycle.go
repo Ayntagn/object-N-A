@@ -78,6 +78,7 @@ func (a *workspaceApplication) newWindow(tab *workspaceTab, origin *workspaceWin
 		app.index.data = origin.index.data
 		app.index.wikiImages = origin.index.wikiImages
 		app.index.wikiPDFs = origin.index.wikiPDFs
+		app.index.bodyCache = origin.index.bodyCache
 		app.folders = make(map[string]*bool)
 		app.previewZoom = origin.previewZoom
 	}
@@ -158,8 +159,12 @@ func (a *workspaceApplication) releaseWindow(app *workspaceWindow) {
 	if app.index.stopWatch != nil {
 		app.index.stopWatch()
 	}
+	if app.index.cancelBody != nil {
+		app.index.cancelBody()
+	}
 	app.clearUnlinkedMentions()
 	app.clearVaultSidebarSearch()
+	app.previewPane.clearResources()
 	storages := map[*workspace.Vault]bool{app.vault: true}
 	for _, tab := range app.tabs {
 		tab.cancelAPIRequests()

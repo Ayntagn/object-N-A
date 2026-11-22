@@ -10,7 +10,7 @@ import (
 )
 
 func TestVisualWikiImageSurvivesEditsAndReload(t *testing.T) {
-	const name = "Pasted image 20260102150405.png"
+	const name = "Pasted image 20261010225632.png"
 	const token = "![[" + name + "]]"
 	const original = token + "\n\nAfter.\n"
 	app, tester, vault, file := imageWorkspace(t, original)

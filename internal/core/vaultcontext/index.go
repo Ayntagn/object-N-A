@@ -2,7 +2,6 @@
 package vaultcontext
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"object-na.local/vectorsearch"
 )
 
 type Engine string
@@ -75,6 +76,12 @@ type indexedChunk struct {
 	Offset int       `json:"byteOffset"`
 	Text   string    `json:"text"`
 	Vector []float32 `json:"vector"`
+	norm   float64
+}
+
+func (chunk *indexedChunk) setVector(vector []float32) {
+	chunk.Vector = vector
+	chunk.norm = vectorsearch.Norm(vector)
 }
 
 func (i *Index) Depth() Depth    { return i.data.Depth }
@@ -112,6 +119,10 @@ func (i *Index) UnmarshalJSON(data []byte) error {
 	}
 	if !decoded.valid() {
 		return errIndexFormat
+	}
+	for at := range decoded.Chunks {
+		chunk := &decoded.Chunks[at]
+		chunk.setVector(chunk.Vector)
 	}
 	i.data = decoded
 	return nil
@@ -203,44 +214,18 @@ func validVector(vector []float32, dimension int) bool {
 // EV-UI-290. Ordinary Chat requests up to five chunks with cosine ≥ 0.30.
 // Ties retain index order.
 func (i *Index) search(ctx context.Context, query []float32) ([]Match, error) {
-	queryNorm := vectorNorm(query)
-	if queryNorm == 0 {
-		return nil, ctx.Err()
-	}
-	var matches []Match
-	for _, chunk := range i.data.Chunks {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		var dot, squaredNorm float64
-		for at, value := range chunk.Vector {
-			value := float64(value)
-			dot += value * float64(query[at])
-			squaredNorm += value * value
-		}
-		if squaredNorm == 0 {
-			continue
-		}
-		score := dot / (math.Sqrt(squaredNorm) * queryNorm)
-		if score >= minimumScore {
-			matches = append(matches, Match{
-				Path: i.data.Paths[chunk.File], Text: chunk.Text, Offset: chunk.Offset,
-				Length: len(chunk.Text), Score: min(1, score),
-			})
-		}
-	}
-	slices.SortStableFunc(matches, func(a, b Match) int { return cmp.Compare(b.Score, a.Score) })
-	if err := ctx.Err(); err != nil {
+	selected, err := vectorsearch.CosineTopK(ctx, query, len(i.data.Chunks), searchLimit, minimumScore, func(at int) vectorsearch.Vector {
+		chunk := &i.data.Chunks[at]
+		return vectorsearch.Vector{Values: chunk.Vector, Norm: chunk.norm}
+	})
+	if err != nil || len(selected) == 0 {
 		return nil, err
 	}
-	return matches[:min(searchLimit, len(matches))], nil
-}
-
-func vectorNorm(vector []float32) float64 {
-	var squared float64
-	for _, value := range vector {
-		v := float64(value)
-		squared += v * v
+	matches := make([]Match, len(selected))
+	for at, match := range selected {
+		chunk := &i.data.Chunks[match.Index]
+		matches[at] = Match{Path: i.data.Paths[chunk.File], Text: chunk.Text, Offset: chunk.Offset,
+			Length: len(chunk.Text), Score: match.Score}
 	}
-	return math.Sqrt(squared)
+	return matches, nil
 }

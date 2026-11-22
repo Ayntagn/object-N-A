@@ -90,4 +90,33 @@ if (plan.SystemPrint) {
     drawNumber(page, slice.number, plan.Height);
   }
 }
-return JSON.stringify({Data: await doc.saveAsBase64({updateFieldAppearances: false}), Pages: doc.getPageCount()});
+const saveOptions = {updateFieldAppearances: false};
+const Pages = doc.getPageCount();
+if (!plan.Upload) return JSON.stringify({Data: await doc.saveAsBase64(saveOptions), Pages});
+const data = await doc.save(saveOptions);
+if (data.length >= plan.Upload.minBytes && data.length <= plan.Upload.maxBytes) {
+  try {
+    const chunkBytes = plan.Upload.chunkBytes;
+    // WebKit reads each request on the UI thread. Await the response before sending the next chunk.
+    const payload = new Uint8Array(Math.min(data.length, chunkBytes) + 8);
+    const header = new DataView(payload.buffer);
+    header.setUint32(0, data.length);
+    for (let offset = 0; offset < data.length; offset += chunkBytes) {
+      const chunk = data.subarray(offset, offset + chunkBytes);
+      header.setUint32(4, offset);
+      payload.set(chunk, 8);
+      const response = await fetch(plan.Upload.url, {
+        method: "POST", body: payload.subarray(0, chunk.length + 8), credentials: "omit"
+      });
+      if (!response.ok) throw new Error("PDF result upload failed");
+    }
+    return JSON.stringify({Uploaded: true, Pages});
+  } catch (_) {
+    // Older WebViews can deliver the same bytes in the Eval result.
+  }
+}
+let Data = "";
+// Encode whole Base64 quanta at a time to keep each function call small.
+for (let at = 0; at < data.length; at += 24576)
+  Data += btoa(String.fromCharCode(...data.subarray(at, at + 24576)));
+return JSON.stringify({Data, Pages});

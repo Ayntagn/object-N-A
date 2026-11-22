@@ -11,7 +11,7 @@ import (
 
 func TestWikiPDFTargetResolvesPageAndVaultPath(t *testing.T) {
 	const source = "Notes/课堂笔记.md"
-	const course = "02 二进制练习.pdf"
+	const course = "02 数制和编码.pdf"
 	const textbook = "逻辑设计基础：第7版 (Fundamentals of Logic Design).pdf"
 	root := t.TempDir()
 	for _, relative := range []string{"Notes/" + course, "Course/" + course, "Course/" + textbook} {

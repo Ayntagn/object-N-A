@@ -94,10 +94,11 @@ func (app *workspaceWindow) vaultSearchChanged() {
 	// The query captures the published file and label snapshots at input time
 	// and remains visible across later index publications (EV-UI-188/189).
 	vault, entries, index, win := app.vault, app.entries, app.index.data, app.win
+	bodyCache := app.index.bodyCache
 	app.startVaultRelatedSearch(input, query)
 	app.publishVaultSearchGraph()
 	if win == nil {
-		app.publishVaultSearch(index.SearchSidebar(context.Background(), vault, entries, query, ""))
+		app.publishVaultSearch(index.SearchSidebarWithBodyIndex(context.Background(), vault, entries, query, "", bodyCache))
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -110,7 +111,7 @@ func (app *workspaceWindow) vaultSearchChanged() {
 			return
 		case <-timer.C:
 		}
-		results := index.SearchSidebar(ctx, vault, entries, query, "")
+		results := index.SearchSidebarWithBodyIndex(ctx, vault, entries, query, "", bodyCache)
 		if ctx.Err() != nil {
 			return
 		}

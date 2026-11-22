@@ -8,6 +8,8 @@
 	<string>object-N/A</string>
 	<key>CFBundleExecutable</key>
 	<string>object-n-a</string>
+	<key>CFBundleIconFile</key>
+	<string>object-n-a.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>io.github.ayntagn.objectna</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -17,9 +19,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.3.0</string>
+	<string>0.4.0</string>
 	<key>CFBundleVersion</key>
-	<string>176</string>
+	<string>187</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.productivity</string>
 	<key>LSMinimumSystemVersion</key>

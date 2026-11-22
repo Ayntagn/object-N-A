@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"image"
 	"math"
 	"net/url"
 	"path"
@@ -20,6 +21,7 @@ const visualImageFormHeight = 56
 const visualImageCaptionHeight = 14
 const visualImageCaptionGap = 4
 const visualImageControlHeight = 46
+const largeVisualBitmapBytes = 16 << 20
 
 type visualImageResource struct {
 	bitmap *mygoui.Bitmap
@@ -40,7 +42,16 @@ type visualImageCache struct {
 	active int
 }
 
-func (cache *visualImageCache) load(app *workspaceWindow, source string, wiki bool) *mygoui.Bitmap {
+func (cache *visualImageCache) releaseOriginalPixels() {
+	for _, resource := range cache.images {
+		if resource.bytes >= largeVisualBitmapBytes {
+			resource.bitmap.ReleaseOriginalPixels()
+		}
+	}
+}
+
+func (cache *visualImageCache) load(app *workspaceWindow, source string, wiki bool,
+	previewShrink func(w, h int) float32) *mygoui.Bitmap {
 	origin := app.previewOrigin()
 	origin.index = nil
 	if cache.origin != origin {
@@ -75,11 +86,20 @@ func (cache *visualImageCache) load(app *workspaceWindow, source string, wiki bo
 	cache.images[key] = entry
 	decode := func() *mygoui.Bitmap {
 		for _, relative := range candidates {
-			data, _, err := origin.vault.ReadPreviewImage(relative, 4<<20)
+			data, mime, err := origin.vault.ReadPreviewImage(relative, 4<<20)
+			if err != nil {
+				continue
+			}
+			var decodePreview func([]byte, int) (image.Image, error)
+			switch mime {
+			case "image/png":
+				decodePreview = decodeVisualPNGPreview
+			case "image/jpeg":
+				decodePreview = decodeVisualJPEGPreview
+			}
+			bitmap, err := mygoui.DecodeBitmapPreview(data, previewShrink, decodePreview)
 			if err == nil {
-				if bitmap, err := mygoui.DecodeBitmap(data); err == nil {
-					return bitmap
-				}
+				return bitmap
 			}
 		}
 		return nil
@@ -185,15 +205,57 @@ func (w *workspaceWYSIWYG) drawVisualImages(c *mygoui.Context, app *workspaceWin
 		}
 		width := max(1, view.viewport.W-2*view.padding)
 		selected := view.start <= offset && offset < view.end
-		bitmap := w.images.load(app, picture.Source, picture.Wiki)
-		if picture.Block && start == offset && end == offset+1 && !text.ParagraphStyleAt(offset).Quote {
+		block := picture.Block && start == offset && end == offset+1 && !text.ParagraphStyleAt(offset).Quote
+		var shrink func(w, h int) float32
+		if block {
+			shrink = visualImageBlockShrink(picture, width, c.PixelScale(), w.imageResize)
+		}
+		bitmap := w.images.load(app, picture.Source, picture.Wiki, shrink)
+		if block {
 			w.drawImageCard(c, app, picture, text, box, view, width, bitmap, selected)
 			return true
-		} else {
-			w.drawInlineImage(c, picture, width, bitmap, selected)
 		}
+		w.drawInlineImage(c, picture, width, bitmap, selected)
 	}
 	return false
+}
+
+func visualImageBlockSize(picture *wysiwyg.Image, naturalW, naturalH, width float32,
+	resize visualImageResize) (base, maxHeight, imageWidth, height float32) {
+	if picture.HasTransform() || picture.WikiWidth > 0 {
+		return transformedVisualImageSize(picture, naturalW, naturalH, width, resize)
+	}
+	base = naturalH * min(1, width/naturalW)
+	height = float32(min(4096, max(visualImageMinHeight, float64(base)*picture.Ratio)))
+	if resize.picture == picture {
+		height = resize.height
+	}
+	return base, 4096, min(width, height*naturalW/naturalH), height
+}
+
+func visualImageBlockShrink(picture *wysiwyg.Image, width, pixelScale float32, resize visualImageResize) func(w, h int) float32 {
+	// The preview is decoded off the main thread. Only the drawing geometry
+	// as it was at request time is consulted there.
+	geometry := *picture
+	if resize.picture == picture {
+		resize = visualImageResize{picture: &geometry, height: resize.height}
+	} else {
+		resize = visualImageResize{}
+	}
+	return func(w, h int) float32 {
+		if int64(w)*int64(h)*4 < largeVisualBitmapBytes {
+			return 1
+		}
+		originalW, originalH := float32(w), float32(h)
+		_, _, drawW, drawH := visualImageBlockSize(&geometry, originalW, originalH, width, resize)
+		if geometry.HasTransform() {
+			if geometry.SwapsAxes() {
+				drawW, drawH = drawH, drawW
+			}
+			return (1 / min(drawW/originalW, drawH/originalH)) / pixelScale
+		}
+		return (1 / max(drawW/originalW, drawH/originalH)) / pixelScale
+	}
 }
 
 func (w *workspaceWYSIWYG) drawInlineImage(c *mygoui.Context, picture *wysiwyg.Image, maxWidth float32, bitmap *mygoui.Bitmap, selected bool) {
@@ -261,16 +323,7 @@ func (w *workspaceWYSIWYG) drawImageCard(c *mygoui.Context, app *workspaceWindow
 	height := float32(visualImageMinHeight)
 	if bitmap != nil {
 		naturalW, naturalH := mygoui.ImageSize(bitmap)
-		if picture.HasTransform() || picture.WikiWidth > 0 {
-			base, maxHeight, imageWidth, height = transformedVisualImageSize(picture, naturalW, naturalH, width, w.imageResize)
-		} else {
-			base = naturalH * min(1, width/naturalW)
-			height = float32(min(4096, max(visualImageMinHeight, float64(base)*picture.Ratio)))
-			if w.imageResize.picture == picture {
-				height = w.imageResize.height
-			}
-			imageWidth = min(width, height*naturalW/naturalH)
-		}
+		base, maxHeight, imageWidth, height = visualImageBlockSize(picture, naturalW, naturalH, width, w.imageResize)
 	} else if picture.Caption == "" {
 		imageWidth = min(width, 100)
 	}
@@ -387,7 +440,7 @@ func (w *workspaceWYSIWYG) drawImageLinkForm(c *mygoui.Context, app *workspaceWi
 	mygoui.Button(c.Key("confirm image link"), "Confirm").Absolute().Right(24).Top(8).Width(min(101, width*.32)).Height(40).
 		Font(font).FontSize(14).OnClick(submit).Disabled(!w.editable(app))
 	if width >= 400 {
-		if bitmap := w.images.load(app, strings.TrimSpace(state.link), false); bitmap != nil {
+		if bitmap := w.images.load(app, strings.TrimSpace(state.link), false, nil); bitmap != nil {
 			naturalW, naturalH := mygoui.ImageSize(bitmap)
 			factor := min(1, 48/naturalH, 64/naturalW)
 			mygoui.Image(c.Key("image link preview"), bitmap).Absolute().Right(135).Top((56-naturalH*factor)/2).

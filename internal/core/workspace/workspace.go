@@ -27,12 +27,13 @@ type Vault struct {
 }
 
 type Entry struct {
-	Name     string
-	Path     string // Slash-separated path relative to the Vault.
-	IsDir    bool
-	Children []Entry
-	modified time.Time
-	size     int64
+	Name         string
+	Path         string // Slash-separated path relative to the Vault.
+	IsDir        bool
+	hasHardLinks bool // The directory contains a file that has multiple names.
+	Children     []Entry
+	modified     time.Time
+	size         int64
 }
 
 // ModTime returns the modification time captured when the Vault was listed.
@@ -108,17 +109,25 @@ func IsMarkdownPath(name string) bool {
 }
 
 func readEntries(vaultFS fs.FS, dir string, depth int, include func(fs.DirEntry) bool) ([]Entry, error) {
+	entries, _, err := readEntriesWithLinks(vaultFS, dir, depth, include)
+	return entries, err
+}
+
+func readEntriesWithLinks(vaultFS fs.FS, dir string, depth int, include func(fs.DirEntry) bool) ([]Entry, bool, error) {
 	files, err := fs.ReadDir(vaultFS, dir)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var entries []Entry
+	var hasHardLinks bool
 	for _, file := range files {
 		name := file.Name()
 		if (dir == "." && strings.EqualFold(name, TrashDirectory)) || strings.HasPrefix(name, moveStagePrefix) {
 			continue
 		}
 		if !include(file) {
+			// A directory hint can arrive through a name the sidebar omits.
+			hasHardLinks = hasHardLinks || dirEntryHasHardLinks(file)
 			continue
 		}
 		relative := path.Join(dir, name)
@@ -126,14 +135,15 @@ func readEntries(vaultFS fs.FS, dir string, depth int, include func(fs.DirEntry)
 		switch {
 		case file.IsDir():
 			if depth != 0 {
-				children, err := readEntries(vaultFS, relative, depth-1, include)
+				children, linked, err := readEntriesWithLinks(vaultFS, relative, depth-1, include)
 				if errors.Is(err, fs.ErrNotExist) {
 					continue
 				}
 				if err != nil {
-					return nil, err
+					return nil, false, err
 				}
 				entry.Children = children
+				entry.hasHardLinks = linked
 			}
 			entry.IsDir = true
 		case file.Type().IsRegular():
@@ -142,15 +152,19 @@ func readEntries(vaultFS fs.FS, dir string, depth int, include func(fs.DirEntry)
 		}
 		if info, err := file.Info(); err == nil {
 			entry.modified, entry.size = info.ModTime(), info.Size()
+			if !entry.IsDir {
+				hasHardLinks = hasHardLinks || fileHasHardLinks(info)
+			}
 		} else if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
+		hasHardLinks = hasHardLinks || entry.hasHardLinks
 		entries = append(entries, entry)
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].IsDir && !entries[j].IsDir
 	})
-	return entries, nil
+	return entries, hasHardLinks, nil
 }
 
 func (v *Vault) ReadDocument(relative string) (Document, error) {

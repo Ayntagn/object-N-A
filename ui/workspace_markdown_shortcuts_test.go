@@ -131,18 +131,19 @@ func TestMarkdownShortcutsThroughSourceInput(t *testing.T) {
 	tester.Type("Detail")
 	tester.Key(0, mygoui.KeyTab)
 	tester.Key(0, mygoui.KeyEnter)
-	for _, key := range []string{"$", "f", "f"} {
-		tester.Type(key)
-	}
-	if got := app.draft.String(); got != "# Example / Detail\n$\\frac{}{}" {
+	tester.Type("$$")
+	tester.Key(0, mygoui.KeyLeft)
+	tester.Type("f")
+	tester.Type("f")
+	if got := app.draft.String(); got != "# Example / Detail\n$\\frac{}{}$" {
 		t.Fatalf("auto math and text shortcut produced %q", got)
 	}
 	tester.Key(mygoui.Cmd, mygoui.KeyZ)
-	if got := app.draft.String(); got != "# Example / Detail\n$f" {
+	if got := app.draft.String(); got != "# Example / Detail\n$f$" {
 		t.Fatalf("Undo did not remove just the math expansion: %q", got)
 	}
 	tester.Type("f")
-	if got := app.draft.String(); got != "# Example / Detail\n$\\frac{}{}" {
+	if got := app.draft.String(); got != "# Example / Detail\n$\\frac{}{}$" {
 		t.Fatalf("math shortcut did not expand after undo: %q", got)
 	}
 }

@@ -43,7 +43,7 @@ return true;`, nil
 // A stray dollar can close inside the next code span. Keep the parser's
 // original code boundaries when that happens and escape the false opener in
 // the preview's copy of the source.
-func setPreviewDocument(doc *parser.Document, source string) {
+func setPreviewDocument(doc *parser.Document, source string) []int {
 	if doc.Extensions()&parser.ExtMath != 0 && strings.Contains(source, `\`+exportdoc.PageBreakMarker) {
 		var normalized strings.Builder
 		start := 0
@@ -63,7 +63,7 @@ func setPreviewDocument(doc *parser.Document, source string) {
 	}
 	doc.Set(source)
 	if doc.Extensions()&parser.ExtDollarMath == 0 || !strings.ContainsRune(source, '`') {
-		return
+		return nil
 	}
 	var candidates []parser.Inline
 	for block := 1; block < doc.Len(); block++ {
@@ -75,7 +75,7 @@ func setPreviewDocument(doc *parser.Document, source string) {
 		}
 	}
 	if len(candidates) == 0 {
-		return
+		return nil
 	}
 
 	literal := parser.New(doc.Extensions() &^ parser.ExtDollarMath)
@@ -94,18 +94,20 @@ func setPreviewDocument(doc *parser.Document, source string) {
 		}
 	}
 	if len(openers) == 0 {
-		return
+		return nil
 	}
 	slices.Sort(openers)
+	openers = slices.Compact(openers)
 	var text strings.Builder
 	start := 0
-	for _, opener := range slices.Compact(openers) {
+	for _, opener := range openers {
 		text.WriteString(source[start:opener])
 		text.WriteByte('\\')
 		start = opener
 	}
 	text.WriteString(source[start:])
 	doc.Set(text.String())
+	return openers
 }
 
 // The WebView loads the fonts without a file origin or a network request.

@@ -108,6 +108,10 @@ func (v *view) ReplaceText(r *ui.TextInputRange, s string) {
 	if v.opts.ReadOnly {
 		return
 	}
+	if v.opts.OnInput != nil && !v.composing && s != "" && (r == nil || *r == v.Selection().Range) &&
+		v.offerInput(ui.InputEvent{Kind: ui.InputText, Text: s}) {
+		return
+	}
 	switch {
 	case r == nil && v.compose != "":
 		v.compose = ""

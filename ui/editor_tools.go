@@ -118,7 +118,7 @@ func (app *workspaceWindow) drawSourceEditor(c *mygoui.Context, tab *workspaceTa
 	code := tab.code
 	services := c.Services()
 	code.OnInput = func(event mygoui.InputEvent) bool {
-		if imagePasteCommand(event) && app.pasteSourceImage(tab, services) {
+		if notePasteCommand(event) && app.pasteSourceNote(tab, services) {
 			return true
 		}
 		return app.sourceInput(event)
@@ -223,7 +223,7 @@ func (app *workspaceWindow) dropIntoSourceEditor(source mygoui.Element, tab *wor
 		return true
 	}, func(markdown string, hasImage bool) {
 		if hasImage {
-			markdown = sourceImageBlock(tab.draft.Snapshot(), at, at, markdown)
+			markdown = sourceBlockAtSelection(tab.draft.Snapshot(), at, at, markdown)
 		}
 		if code.InsertAt(at, markdown) && (app.workspaceTab == active || app.workspaceTab == tab) {
 			app.selectMultiFileTile(tab)
@@ -232,17 +232,19 @@ func (app *workspaceWindow) dropIntoSourceEditor(source mygoui.Element, tab *wor
 	})
 }
 
-func sourceImageBlock(snapshot editor.Snapshot, start, end int, markdown string) string {
+func sourceBlockAtSelection(snapshot editor.Snapshot, start, end int, markdown string) string {
 	const blankLine = "\n\n"
 	if start > 0 {
 		before := snapshot.Slice(max(0, start-len(blankLine)), start)
 		newlines := len(before) - len(strings.TrimRight(before, "\n"))
-		markdown = blankLine[newlines:] + markdown
+		newlines += len(markdown) - len(strings.TrimLeft(markdown, "\n"))
+		markdown = blankLine[min(newlines, len(blankLine)):] + markdown
 	}
 	if end < snapshot.Len() {
 		after := snapshot.Slice(end, min(snapshot.Len(), end+len(blankLine)))
 		newlines := len(after) - len(strings.TrimLeft(after, "\n"))
-		markdown += blankLine[newlines:]
+		newlines += len(markdown) - len(strings.TrimRight(markdown, "\n"))
+		markdown += blankLine[min(newlines, len(blankLine)):]
 	}
 	return markdown
 }
@@ -286,6 +288,9 @@ func (app *workspaceWindow) registerEditorShortcuts(c *mygoui.Context) {
 }
 
 func (app *workspaceWindow) sourceInput(event mygoui.InputEvent) bool {
+	if externalCodeShortcut(event) && app.editSourceCodeExternally() {
+		return true
+	}
 	if event.Kind == mygoui.InputText && event.Text != "" && !app.multiFile.active &&
 		app.document.Path == "" && app.sourceEditing() && app.showsStartPage() {
 		app.startTitleFromSource = true
@@ -313,6 +318,9 @@ func (app *workspaceWindow) sourceInput(event mygoui.InputEvent) bool {
 	}
 	if (event.Kind != mygoui.InputText && event.Kind != mygoui.InputKeyDown) || !app.sourceMarkdownTyping() {
 		return false
+	}
+	if app.pairSourceInput(event) {
+		return true
 	}
 	if event.Kind == mygoui.InputText {
 		return app.typeSourceMarkdown(event.Text)

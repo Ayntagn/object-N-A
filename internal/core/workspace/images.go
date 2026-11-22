@@ -67,6 +67,16 @@ func (v *Vault) ReadPreviewImage(relative string, limit int64) ([]byte, string, 
 	return data, mime, nil
 }
 
+// PreviewImageStamp identifies a reusable image read on volumes with a precise
+// file change time. A zero stamp means callers must read the image again.
+func (v *Vault) PreviewImageStamp(relative string) IndexedNoteStamp {
+	info, err := v.StatEntry(relative)
+	if err != nil {
+		return IndexedNoteStamp{}
+	}
+	return v.indexedNoteStamp(info)
+}
+
 // ImportImage returns a portable Markdown destination for a selected image.
 // It copies an external image beside a saved note and leaves both inputs intact.
 func (v *Vault) ImportImage(notePath, pickedAbsolute string) (string, error) {

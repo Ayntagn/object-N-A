@@ -22,6 +22,7 @@ $shortcutPath = Join-Path $programs 'object-N-A.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $executable
+$shortcut.IconLocation = "$executable,0"
 $shortcut.WorkingDirectory = $installDir
 $shortcut.Description = 'object-N/A Markdown Workspace'
 $shortcut.Save()

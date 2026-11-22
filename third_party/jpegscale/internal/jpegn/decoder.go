@@ -1,0 +1,1384 @@
+package jpegn
+
+import (
+	"bytes"
+	"encoding/binary"
+	"image"
+	"image/color"
+	"math"
+)
+
+// component stores information about a single color component (e.g., Y, Cb, or Cr).
+type component struct {
+	id                 int     // Component identifier (e.g., 1 for Y, 2 for Cb, 3 for Cr).
+	ssX, ssY           int     // Subsampling factors for X and Y axes.
+	width, height      int     // Dimensions of this component in pixels.
+	nBlocksX, nBlocksY int     // MCU-padded dimensions in blocks (buffer stride).
+	blocksPerLine      int     // True blocks per line, for non-interleaved scans.
+	blocksPerCol       int     // True block rows, for non-interleaved scans.
+	stride             int     // The number of bytes from one row of pixels to the next.
+	qtSel              int     // Quantization table selector.
+	acTabSel, dcTabSel int     // Huffman table selectors for AC and DC coefficients.
+	dcPred             int     // DC prediction value for differential coding.
+	pixels             []byte  // Decoded pixel data for this component (used in baseline).
+	coeffs             []int32 // Stores DCT coefficients for progressive mode (natural order).
+}
+
+// decoder holds the state of the JPEG decoding process.
+type decoder struct {
+	jpegData            []byte                    // Input buffer containing the entire JPEG file.
+	pos                 int                       // Current position index in the input buffer.
+	size                int                       // Remaining bytes to be processed.
+	length              int                       // Length of the current marker segment.
+	width, height       int                       // Dimensions of the final image.
+	mbWidth, mbHeight   int                       // Dimensions of the image in MCU (Minimum Coded Unit) blocks.
+	mbSizeX, mbSizeY    int                       // Dimensions of a single MCU in pixels.
+	ncomp               int                       // Number of color components (1 for grayscale, 3 for color, 4 for CMYK).
+	comp                [4]component              // Array to hold data for each color component.
+	qtUsed, qtAvail     int                       // Bitmasks tracking used and available quantization tables.
+	qtab                [4]*[64]uint16            // Pointers for pooling. Stored in zigzag order; 8- or 16-bit values.
+	dcHuff              [4]*huffTable             // DC Huffman tables (indices 0-3).
+	acHuff              [4]*huffTable             // AC Huffman tables (indices 0-3).
+	buf                 uint64                    // Use uint64 for fewer refills.
+	bufBits             int                       // Number of valid bits in the bit buffer.
+	markerHit           bool                      // True if a marker was hit during bit reading.
+	eobRun              int                       // Global End-of-Block run counter (progressive AC).
+	block               [64]int32                 // Temporary storage for a single 8x8 block of DCT coefficients (natural order).
+	rstInterval         int                       // Restart interval in MCUs, for error resilience.
+	pixels              []byte                    // Final decoded pixel data (RGBA buffer).
+	subsampleRatio      image.YCbCrSubsampleRatio // The detected YCbCr subsampling ratio.
+	isRGB               bool                      // True if the image is encoded as RGB instead of YCbCr.
+	isBaseline          bool                      // True if the image is a baseline JPEG.
+	isArith             bool                      // True if the frame marker declares arithmetic coding.
+	sawDHT              bool                      // True once a Huffman table has been read.
+	scanned             uint                      // Bitmask of components a baseline scan has covered.
+	isProgressive       bool                      // True if the image is a progressive JPEG.
+	upsampleMethod      UpsampleMethod            // The upsampling method to use.
+	toRGBA              bool                      // Whether to convert the final image to RGBA.
+	autoRotate          bool                      // Whether to auto-rotate based on EXIF orientation.
+	orientation         int                       // EXIF orientation tag (1-8).
+	adobeTransformValid bool                      // True if APP14 Adobe marker was found.
+	adobeTransform      uint8                     // Adobe color transform: 0=Unknown(RGB/CMYK), 1=YCbCr, 2=YCCK.
+	scaleDenom          int                       // IDCT scaling denominator: 1 (no scaling), 2 (1/2), 4 (1/4), 8 (1/8).
+	probe               bool                      // Stop at the first SOS, allocating no planes.
+	atSOS               bool                      // The probe stopped at an SOS marker.
+
+}
+
+// errDecode is used for internal panics during the hot decoding path.
+type errDecode struct{ error }
+
+// maxImagePixels caps the SOF pixel count to avoid huge allocations from corrupt
+// dimensions, while staying well above any real image (~268 megapixels).
+const maxImagePixels = min(1<<28, math.MaxInt>>6)
+
+// zz is the zigzag ordering table. It maps the 1D order of coefficients in the JPEG stream (zigzag index)
+// to their 2D position (natural index) in an 8x8 block.
+var zz = [64]int{
+	0, 1, 8, 16, 9, 2, 3, 10,
+	17, 24, 32, 25, 18, 11, 4, 5,
+	12, 19, 26, 33, 40, 48, 41, 34,
+	27, 20, 13, 6, 7, 14, 21, 28,
+	35, 42, 49, 56, 57, 50, 43, 36,
+	29, 22, 15, 23, 30, 37, 44, 51,
+	58, 59, 52, 45, 38, 31, 39, 46,
+	53, 60, 61, 54, 47, 55, 62, 63,
+}
+
+// Default Huffman tables (JPEG standard Annex K).
+
+// Table K.3: DC Luminance (Class 0, Index 0)
+var defaultDCLumaCounts = [16]uint8{
+	0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0,
+}
+var defaultDCLumaValues = []byte{
+	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+}
+
+// Table K.4: DC Chrominance (Class 0, Index 1)
+var defaultDCChromaCounts = [16]uint8{
+	0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+}
+var defaultDCChromaValues = []byte{
+	0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+}
+
+// Table K.5: AC Luminance (Class 1, Index 0)
+var defaultACLumaCounts = [16]uint8{
+	0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 125,
+}
+var defaultACLumaValues = []byte{
+	0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06, 0x13, 0x51, 0x61, 0x07,
+	0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xa1, 0x08, 0x23, 0x42, 0xb1, 0xc1, 0x15, 0x52, 0xd1, 0xf0,
+	0x24, 0x33, 0x62, 0x72, 0x82, 0x09, 0x0a, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x25, 0x26, 0x27, 0x28,
+	0x29, 0x2a, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49,
+	0x4a, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69,
+	0x6a, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89,
+	0x8a, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7,
+	0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3, 0xc4, 0xc5,
+	0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xe1, 0xe2,
+	0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8,
+	0xf9, 0xfa,
+}
+
+// Table K.6: AC Chrominance (Class 1, Index 1)
+var defaultACChromaCounts = [16]uint8{
+	0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 119,
+}
+var defaultACChromaValues = []byte{
+	0x00, 0x01, 0x02, 0x03, 0x11, 0x04, 0x05, 0x21, 0x31, 0x06, 0x12, 0x41, 0x51, 0x07, 0x61, 0x71,
+	0x13, 0x22, 0x32, 0x81, 0x08, 0x14, 0x42, 0x91, 0xa1, 0xb1, 0xc1, 0x09, 0x23, 0x33, 0x52, 0xf0,
+	0x15, 0x62, 0x72, 0xd1, 0x0a, 0x16, 0x24, 0x34, 0xe1, 0x25, 0xf1, 0x17, 0x18, 0x19, 0x1a, 0x26,
+	0x27, 0x28, 0x29, 0x2a, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
+	0x49, 0x4a, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68,
+	0x69, 0x6a, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
+	0x88, 0x89, 0x8a, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0xa2, 0xa3, 0xa4, 0xa5,
+	0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3,
+	0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda,
+	0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8,
+	0xf9, 0xfa,
+}
+
+// Pre-built default Huffman tables (JPEG Annex K).
+var (
+	defaultDCLumaHuff   huffTable
+	defaultDCChromaHuff huffTable
+	defaultACLumaHuff   huffTable
+	defaultACChromaHuff huffTable
+)
+
+func init() {
+	// Build default Huffman tables once at startup.
+	_ = buildHuff(&defaultDCLumaHuff, &defaultDCLumaCounts, defaultDCLumaValues)
+	_ = buildHuff(&defaultDCChromaHuff, &defaultDCChromaCounts, defaultDCChromaValues)
+	_ = buildHuff(&defaultACLumaHuff, &defaultACLumaCounts, defaultACLumaValues)
+	_ = buildHuff(&defaultACChromaHuff, &defaultACChromaCounts, defaultACChromaValues)
+}
+
+// clamp clamps an int32 value to the valid 8-bit pixel range [0, 255].
+func clamp(x int32) byte {
+	return byte(min(max(x, 0), 255))
+}
+
+// newDecoder creates a new decoder instance and allocates the large tables.
+func newDecoder() *decoder {
+	d := new(decoder)
+	for i := 0; i < 4; i++ {
+		d.qtab[i] = new([64]uint16)
+		d.dcHuff[i] = new(huffTable)
+		d.acHuff[i] = new(huffTable)
+	}
+
+	// Initialize default Huffman tables by copying from pre-built globals.
+	*d.dcHuff[0] = defaultDCLumaHuff
+	*d.dcHuff[1] = defaultDCChromaHuff
+	*d.acHuff[0] = defaultACLumaHuff
+	*d.acHuff[1] = defaultACChromaHuff
+
+	return d
+}
+
+// panic triggers an internal panic to signal a decoding error in the hot path.
+func (d *decoder) panic(err error) {
+	panic(errDecode{err})
+}
+
+// consumeRestart consumes the expected restart marker at a scan interval boundary.
+func (d *decoder) consumeRestart(next *int) error {
+	if err := d.finishScan(); err != nil {
+		return err
+	}
+	for d.size >= 2 && d.jpegData[d.pos+1] == 0xff {
+		d.pos++
+		d.size--
+	}
+	if d.size < 2 || d.jpegData[d.pos+1] != 0xd0+byte(*next) {
+		return ErrSyntax
+	}
+	d.pos += 2
+	d.size -= 2
+	*next = (*next + 1) & 7
+	for i := range d.ncomp {
+		d.comp[i].dcPred = 0
+	}
+	return nil
+}
+
+// resetForConfig clears the decoder state for config-only decoding.
+// This skips expensive VLC table initialization since config-only decoding doesn't need Huffman tables.
+func (d *decoder) resetForConfig() {
+	// Save pointers to the tables.
+	dcHuffTmp := d.dcHuff
+	acHuffTmp := d.acHuff
+	qtabTmp := d.qtab
+
+	// Zero the struct. This clears references (jpegData, pixels, etc.) allowing GC, and resets all state variables.
+	*d = decoder{}
+
+	// Restore pointers to the tables.
+	d.dcHuff = dcHuffTmp
+	d.acHuff = acHuffTmp
+	d.qtab = qtabTmp
+}
+
+// reset clears the decoder state for reuse, preserving the allocated tables.
+func (d *decoder) reset() {
+	// Save pointers to the tables.
+	dcHuffTmp := d.dcHuff
+	acHuffTmp := d.acHuff
+	qtabTmp := d.qtab
+
+	// Zero the struct. This clears references (jpegData, pixels, etc.) allowing GC, and resets all state variables.
+	*d = decoder{}
+
+	// Restore pointers to the tables.
+	d.dcHuff = dcHuffTmp
+	d.acHuff = acHuffTmp
+	d.qtab = qtabTmp
+
+	// Clear the quantization tables to prevent state leakage between decodes.
+	for i := range d.qtab {
+		*d.qtab[i] = [64]uint16{}
+	}
+
+	// Since tables are pooled and might have been overwritten by a previous DHT,
+	// we must restore the defaults here for the next decode operation.
+	*d.dcHuff[0] = defaultDCLumaHuff
+	*d.dcHuff[1] = defaultDCChromaHuff
+	*d.acHuff[0] = defaultACLumaHuff
+	*d.acHuff[1] = defaultACChromaHuff
+
+	// Clear non-default tables (Index 2 and 3) for safety.
+	*d.dcHuff[2] = huffTable{}
+	*d.dcHuff[3] = huffTable{}
+	*d.acHuff[2] = huffTable{}
+	*d.acHuff[3] = huffTable{}
+}
+
+// finishScan accepts at most the padding bits of the final entropy byte.
+// The bit reader leaves the following marker at d.pos, including after fill.
+func (d *decoder) finishScan() error {
+	if d.eobRun != 0 || d.bufBits >= 8 || d.size < 2 ||
+		d.jpegData[d.pos] != 0xff || d.jpegData[d.pos+1] == 0x00 {
+		return ErrSyntax
+	}
+	d.buf, d.bufBits, d.markerHit = 0, 0, false
+	return nil
+}
+
+// skip advances the current position in the jpegData buffer by 'count' bytes.
+func (d *decoder) skip(count int) error {
+	// For resilient decoding, cap skip amount to available data.
+	// This handles truncated segments gracefully (e.g., in DecodeConfig with limited buffer).
+	if count > d.size {
+		count = d.size
+	}
+
+	d.pos += count
+	d.size -= count
+
+	if d.length >= count {
+		d.length -= count
+	} else {
+		d.length = 0
+	}
+
+	// d.size can never be negative now due to the cap above.
+	return nil
+}
+
+// decode16 reads a 16-bit big-endian integer from the specified offset.
+func (d *decoder) decode16(offset int) int {
+	p := d.pos + offset
+
+	return (int(d.jpegData[p]) << 8) | int(d.jpegData[p+1])
+}
+
+// decodeLength reads the 16-bit length field of a JPEG marker segment and updates the decoder's internal length counter.
+func (d *decoder) decodeLength() error {
+	if d.size < 2 {
+		return ErrSyntax
+	}
+
+	d.length = d.decode16(0)
+	// For resilient decoding, allow d.length > d.size (truncated segment).
+	// The skip() function will handle this gracefully by capping the skip amount.
+
+	if d.length < 2 {
+		return ErrSyntax // Length must include its own 2 bytes.
+	}
+
+	// Skip the 2 bytes of the length field itself.
+	// d.length will now hold the size of the remaining payload.
+	return d.skip(2)
+}
+
+// skipMarker reads the length of the current marker's payload and skips it.
+func (d *decoder) skipMarker() error {
+	if err := d.decodeLength(); err != nil {
+		return err
+	}
+
+	return d.skip(d.length)
+}
+
+// Marker Decoders
+
+// decodeAPP1 decodes the APP1 marker segment, typically containing EXIF metadata.
+// It specifically looks for the orientation tag if auto-rotation is enabled.
+func (d *decoder) decodeAPP1() error {
+	if err := d.decodeLength(); err != nil {
+		return err
+	}
+
+	// We only parse EXIF if auto-rotation is enabled.
+	if !d.autoRotate {
+		return d.skip(d.length)
+	}
+
+	// Check for "Exif\0\0" signature (6 bytes).
+	if d.length >= 6 && d.size >= 6 &&
+		d.jpegData[d.pos+0] == 'E' &&
+		d.jpegData[d.pos+1] == 'x' &&
+		d.jpegData[d.pos+2] == 'i' &&
+		d.jpegData[d.pos+3] == 'f' &&
+		d.jpegData[d.pos+4] == 0 &&
+		d.jpegData[d.pos+5] == 0 {
+
+		// Start parsing TIFF header inside EXIF payload, starting after the 6-byte signature.
+		d.parseExif(6)
+	}
+
+	// Skip any remaining data in the segment.
+	// d.length is updated by d.skip() calls.
+	return d.skip(d.length)
+}
+
+// parseExif parses the TIFF header and IFD structure within the EXIF payload to find the orientation tag.
+// 'offset' is relative to the start of the APP1 payload (d.pos).
+func (d *decoder) parseExif(offset int) {
+	// Check if there is enough data for the TIFF header (8 bytes).
+	if d.length < offset+8 {
+		return
+	}
+
+	// TIFF Header starts at d.pos + offset.
+	tiffHeaderPos := d.pos + offset
+
+	// Check Byte order (MM or II).
+	var littleEndian bool
+	byteOrder := d.jpegData[tiffHeaderPos : tiffHeaderPos+2]
+
+	if byteOrder[0] == 0x49 && byteOrder[1] == 0x49 { // II (Intel)
+		littleEndian = true
+	} else if byteOrder[0] == 0x4D && byteOrder[1] == 0x4D { // MM (Motorola)
+		littleEndian = false
+	} else {
+		return // Invalid byte order marker.
+	}
+
+	// Helper functions for reading 16/32-bit integers based on endianness.
+	// These reads relative to the TIFF header start (tiffHeaderPos).
+	read16 := func(relOffset int) uint16 {
+		p := tiffHeaderPos + relOffset
+		if p+1 >= len(d.jpegData) {
+			return 0
+		}
+		if littleEndian {
+			return uint16(d.jpegData[p]) | (uint16(d.jpegData[p+1]) << 8)
+		}
+
+		return (uint16(d.jpegData[p]) << 8) | uint16(d.jpegData[p+1])
+	}
+
+	read32 := func(relOffset int) uint32 {
+		p := tiffHeaderPos + relOffset
+		if p+3 >= len(d.jpegData) {
+			return 0
+		}
+		if littleEndian {
+			return uint32(d.jpegData[p]) | (uint32(d.jpegData[p+1]) << 8) | (uint32(d.jpegData[p+2]) << 16) | (uint32(d.jpegData[p+3]) << 24)
+		}
+
+		return (uint32(d.jpegData[p]) << 24) | (uint32(d.jpegData[p+1]) << 16) | (uint32(d.jpegData[p+2]) << 8) | uint32(d.jpegData[p+3])
+	}
+
+	// Check the magic number (42) at offset 2.
+	if read16(2) != 42 {
+		return
+	}
+
+	// Read the offset to the first IFD (Image File Directory) at offset 4.
+	ifdOffset := read32(4)
+
+	// Basic validation of IFD offset.
+	if ifdOffset < 8 {
+		return
+	}
+
+	// Calculate the available data size starting from the TIFF header.
+	availableDataSize := d.length - offset
+
+	// Ensure the IFD offset is within the segment bounds.
+	if uint32(availableDataSize) < ifdOffset {
+		return
+	}
+
+	// Read the number of entries in the IFD (2 bytes).
+	if uint32(availableDataSize) < ifdOffset+2 {
+		return
+	}
+	numEntries := read16(int(ifdOffset))
+
+	// IFD entries are 12 bytes long. Check if all entries fit within the segment.
+	// If not, we truncate the number of entries we read.
+	requiredSize := ifdOffset + 2 + uint32(numEntries)*12
+	if uint32(availableDataSize) < requiredSize {
+		maxEntries := (uint32(availableDataSize) - ifdOffset - 2) / 12
+		numEntries = uint16(maxEntries)
+	}
+
+	// Iterate through IFD entries to find the Orientation tag (0x0112).
+	entryOffset := int(ifdOffset) + 2
+	const orientationTag = 0x0112
+
+	for i := 0; i < int(numEntries); i++ {
+		tag := read16(entryOffset)
+		if tag == orientationTag {
+			// Check format (Type 3 = SHORT, 2 bytes).
+			format := read16(entryOffset + 2)
+			if format != 3 {
+				break // Invalid format for Orientation
+			}
+
+			// Check count (must be 1).
+			count := read32(entryOffset + 4)
+			if count != 1 {
+				break // Invalid count for Orientation
+			}
+
+			// Read the orientation value (stored in the first 2 bytes of the offset field).
+			orientation := read16(entryOffset + 8)
+			if orientation >= 1 && orientation <= 8 {
+				d.orientation = int(orientation)
+			}
+
+			break // Found it, stop searching.
+		}
+
+		entryOffset += 12
+	}
+}
+
+// decodeAPP14 decodes the APP14 "Adobe" marker segment, which specifies the color space transformation.
+func (d *decoder) decodeAPP14() error {
+	if err := d.decodeLength(); err != nil {
+		return err
+	}
+
+	// Check for the "Adobe" signature.
+	if d.length >= 12 && d.size >= 12 &&
+		d.jpegData[d.pos+0] == 'A' &&
+		d.jpegData[d.pos+1] == 'd' &&
+		d.jpegData[d.pos+2] == 'o' &&
+		d.jpegData[d.pos+3] == 'b' &&
+		d.jpegData[d.pos+4] == 'e' {
+
+		// colorTransform at offset 11: 0=RGB/CMYK, 1=YCbCr, 2=YCCK.
+		d.adobeTransformValid = true
+		d.adobeTransform = d.jpegData[d.pos+11]
+
+		if d.adobeTransform == 0 {
+			d.isRGB = true // For 3-component images, treat as RGB
+		}
+	}
+
+	return d.skip(d.length)
+}
+
+// decodeSOF decodes the Start of Frame segment; configOnly skips pixel allocation.
+func (d *decoder) decodeSOF(configOnly bool) error {
+	ssxMax, ssyMax := 0, 0
+	if err := d.decodeLength(); err != nil {
+		return err
+	}
+
+	if d.length < 9 {
+		return ErrSyntax
+	}
+
+	// Ensure the fixed 6-byte header (precision, dimensions, component count) is
+	// actually present, not just declared (the file may be truncated).
+	if d.size < 6 {
+		return ErrSyntax
+	}
+
+	if d.jpegData[d.pos] != 8 {
+		return ErrUnsupported // Precision must be 8-bit.
+	}
+
+	d.height = d.decode16(1)
+	d.width = d.decode16(3)
+	if d.width == 0 || d.height == 0 {
+		return ErrSyntax
+	}
+
+	if int64(d.width)*int64(d.height) > maxImagePixels {
+		return ErrUnsupported
+	}
+
+	// Reject a pixel count far exceeding the input size as a corrupt SOF.
+	if !configOnly && int64(d.width)*int64(d.height) > int64(len(d.jpegData))*1024 {
+		return ErrUnsupported
+	}
+
+	d.ncomp = int(d.jpegData[d.pos+5])
+	if err := d.skip(6); err != nil {
+		return err
+	}
+
+	switch d.ncomp {
+	case 1, 3, 4: // Grayscale, YCbCr/RGB, or CMYK/YCbCrK
+	default:
+		return ErrUnsupported
+	}
+
+	if d.length < (d.ncomp * 3) {
+		return ErrSyntax
+	}
+
+	// Ensure the per-component descriptors are present.
+	if d.size < d.ncomp*3 {
+		return ErrSyntax
+	}
+
+	for i := 0; i < d.ncomp; i++ {
+		c := &d.comp[i]
+		c.id = int(d.jpegData[d.pos])
+
+		c.ssX = int(d.jpegData[d.pos+1]) >> 4
+		if c.ssX == 0 || (c.ssX&(c.ssX-1)) != 0 {
+			return ErrUnsupported // Subsampling factor must be a power of two.
+		}
+
+		c.ssY = int(d.jpegData[d.pos+1]) & 15
+		if c.ssY == 0 || (c.ssY&(c.ssY-1)) != 0 {
+			return ErrUnsupported // Subsampling factor must be a power of two.
+		}
+
+		c.qtSel = int(d.jpegData[d.pos+2])
+		if (c.qtSel & 0xFC) != 0 {
+			return ErrSyntax
+		}
+
+		if err := d.skip(3); err != nil {
+			return err
+		}
+
+		d.qtUsed |= 1 << c.qtSel
+		if c.ssX > ssxMax {
+			ssxMax = c.ssX
+		}
+
+		if c.ssY > ssyMax {
+			ssyMax = c.ssY
+		}
+	}
+
+	if d.ncomp == 1 {
+		c := &d.comp[0]
+		c.ssX, c.ssY = 1, 1
+		ssxMax, ssyMax = 1, 1
+		d.subsampleRatio = image.YCbCrSubsampleRatio444
+	} else if d.ncomp == 4 {
+		// Four-component images support only [0x11 0x11 0x11 0x11] and [0x22 0x11 0x11 0x22].
+		if d.comp[0].ssX != d.comp[3].ssX || d.comp[0].ssY != d.comp[3].ssY {
+			return ErrUnsupported
+		}
+		if d.comp[1].ssX != 1 || d.comp[1].ssY != 1 || d.comp[2].ssX != 1 || d.comp[2].ssY != 1 {
+			return ErrUnsupported
+		}
+		if (d.comp[0].ssX == 1 && d.comp[0].ssY == 1) || (d.comp[0].ssX == 2 && d.comp[0].ssY == 2) {
+			// Valid: either all 1x1 or C/K are 2x2
+			d.subsampleRatio = image.YCbCrSubsampleRatio444 // Use as placeholder
+		} else {
+			return ErrUnsupported
+		}
+	} else if d.ncomp == 3 {
+		// Check for RGB component IDs as a fallback to APP14 marker.
+		if d.comp[0].id == 'R' && d.comp[1].id == 'G' && d.comp[2].id == 'B' {
+			d.isRGB = true
+		}
+
+		if d.isRGB {
+			d.subsampleRatio = image.YCbCrSubsampleRatio444 // Treat as 4:4:4
+		} else {
+			y, cb, cr := &d.comp[0], &d.comp[1], &d.comp[2]
+			if cb.ssX == 1 && cb.ssY == 1 && cr.ssX == 1 && cr.ssY == 1 {
+				switch {
+				case y.ssX == 1 && y.ssY == 1:
+					d.subsampleRatio = image.YCbCrSubsampleRatio444
+				case y.ssX == 2 && y.ssY == 1:
+					d.subsampleRatio = image.YCbCrSubsampleRatio422
+				case y.ssX == 2 && y.ssY == 2:
+					d.subsampleRatio = image.YCbCrSubsampleRatio420
+				case y.ssX == 1 && y.ssY == 2:
+					d.subsampleRatio = image.YCbCrSubsampleRatio440
+				case y.ssX == 4 && y.ssY == 1:
+					d.subsampleRatio = image.YCbCrSubsampleRatio411
+				case y.ssX == 4 && y.ssY == 2:
+					d.subsampleRatio = image.YCbCrSubsampleRatio410
+				default:
+					d.subsampleRatio = -1
+				}
+			} else {
+				d.subsampleRatio = -1
+			}
+
+			if d.subsampleRatio == -1 {
+				// Non-standard ratio: fall back to 4:4:4 and force RGBA output.
+				d.subsampleRatio = image.YCbCrSubsampleRatio444
+				d.toRGBA = true
+			}
+		}
+	}
+
+	// MCU dimensions: max sampling factor times 8 pixels.
+	d.mbSizeX = ssxMax << 3
+	d.mbSizeY = ssyMax << 3
+
+	// mbWidth/mbHeight represent the number of MCUs in the original image
+	d.mbWidth = (d.width + d.mbSizeX - 1) / d.mbSizeX
+	d.mbHeight = (d.height + d.mbSizeY - 1) / d.mbSizeY
+
+	// Save original dimensions before scaling
+	origWidth := d.width
+	origHeight := d.height
+
+	// Apply IDCT scaling to output dimensions (only for full decode, not config-only)
+	if !configOnly && d.scaleDenom > 1 {
+		d.width = (d.width + d.scaleDenom - 1) / d.scaleDenom
+		d.height = (d.height + d.scaleDenom - 1) / d.scaleDenom
+	}
+
+	// Calculate output block size based on scaling
+	scaleDenom := d.scaleDenom
+	if scaleDenom < 1 {
+		scaleDenom = 1
+	}
+	outBlockW := 8 / scaleDenom
+	outBlockH := 8 / scaleDenom
+
+	// Calculate component dimensions and allocate memory for pixels or coefficients.
+	for i := 0; i < d.ncomp; i++ {
+		c := &d.comp[i]
+
+		// Component dimensions in pixels (scaled if scaleDenom > 1)
+		if !configOnly && d.scaleDenom > 1 {
+			// Compute scaled component dimensions
+			unscaledCompWidth := (origWidth*c.ssX + ssxMax - 1) / ssxMax
+			unscaledCompHeight := (origHeight*c.ssY + ssyMax - 1) / ssyMax
+			c.width = (unscaledCompWidth + d.scaleDenom - 1) / d.scaleDenom
+			c.height = (unscaledCompHeight + d.scaleDenom - 1) / d.scaleDenom
+		} else {
+			c.width = (d.width*c.ssX + ssxMax - 1) / ssxMax
+			c.height = (d.height*c.ssY + ssyMax - 1) / ssyMax
+		}
+
+		// Block counts cover the MCU grid, including padding blocks at the edges.
+		c.nBlocksX = d.mbWidth * c.ssX
+		c.nBlocksY = d.mbHeight * c.ssY
+
+		// True (non-MCU-padded) block dimensions; non-interleaved scans iterate
+		// this grid while still addressing the buffer with the nBlocksX stride.
+		fullCompWidth := (origWidth*c.ssX + ssxMax - 1) / ssxMax
+		fullCompHeight := (origHeight*c.ssY + ssyMax - 1) / ssyMax
+		c.blocksPerLine = (fullCompWidth + 7) >> 3
+		c.blocksPerCol = (fullCompHeight + 7) >> 3
+
+		// The stride must account for the scaled block size
+		c.stride = c.nBlocksX * outBlockW
+
+		if !configOnly && !d.probe {
+			if d.isProgressive {
+				// Progressive: Allocate coefficient buffer based on actual component dimensions
+				coeffSize := c.nBlocksX * c.nBlocksY * 64
+
+				if coeffSize <= 0 && (d.width > 0 && d.height > 0) {
+					return ErrOutOfMemory
+				}
+
+				if coeffSize > 0 {
+					// initialize to zero, required for progressive decoding.
+					c.coeffs = make([]int32, coeffSize)
+				}
+
+				// c.pixels will be allocated in postProcessProgressive.
+			} else {
+				// Baseline: Allocate pixel buffer using scaled block height
+				pixelSize := c.stride * c.nBlocksY * outBlockH
+				if pixelSize <= 0 && (d.width > 0 && d.height > 0) {
+					// Handle cases where image is not empty but component might be.
+				}
+
+				if pixelSize > 0 {
+					c.pixels = make([]byte, pixelSize)
+				}
+			}
+		}
+	}
+
+	// Allocate the final RGBA buffer if we know we will need it
+	if !configOnly && !d.probe && (d.toRGBA || d.rgbOutput() || d.autoRotate) {
+		rgbaSize := d.width * d.height * 4
+		if rgbaSize <= 0 && (d.width > 0 && d.height > 0) {
+			return ErrOutOfMemory
+		}
+
+		if rgbaSize > 0 {
+			d.pixels = make([]byte, rgbaSize)
+		}
+	}
+
+	if d.length > 0 {
+		return d.skip(d.length)
+	}
+
+	return nil
+}
+
+// decodeDHT decodes the Define Huffman Table segment. It parses Huffman table
+// specifications and builds fast lookup tables for entropy decoding.
+func (d *decoder) decodeDHT() error {
+	d.sawDHT = true
+
+	var counts [16]uint8
+	if err := d.decodeLength(); err != nil {
+		return err
+	}
+
+	for d.length >= 17 {
+		// The 17-byte table header (class/id + 16 counts) must be present.
+		if d.size < 17 {
+			return ErrSyntax
+		}
+
+		infoByte := int(d.jpegData[d.pos])
+
+		// Parse Tc (Table Class) and Th (Table Destination Identifier).
+		tc := infoByte >> 4 // 0=DC, 1=AC
+		th := infoByte & 0x0F
+
+		if tc > 1 {
+			return ErrSyntax
+		}
+
+		// Baseline only allows th=0 or 1, but progressive allows up to 3.
+		// We support up to 3 for both modes for simplicity.
+		if th > 3 {
+			return ErrUnsupported
+		}
+
+		// Select the correct Huffman table (DC or AC).
+		var huff *huffTable
+		if tc == 0 {
+			huff = d.dcHuff[th]
+		} else {
+			huff = d.acHuff[th]
+		}
+
+		// Read counts of codes for each length (1-16 bits).
+		for codeLen := 1; codeLen <= 16; codeLen++ {
+			counts[codeLen-1] = d.jpegData[d.pos+codeLen]
+		}
+
+		if err := d.skip(17); err != nil {
+			return err
+		}
+
+		var n int
+		for _, num := range counts {
+			n += int(num)
+		}
+
+		if n > 256 || n > d.length || n > d.size {
+			return ErrSyntax
+		}
+
+		// Extract values (HUFFVAL). d.pos is now at the start of the values.
+		values := d.jpegData[d.pos : d.pos+n]
+
+		// Build the canonical Huffman decoding table.
+		if err := buildHuff(huff, &counts, values); err != nil {
+			return err
+		}
+
+		if err := d.skip(n); err != nil {
+			return err
+		}
+	}
+
+	if d.length != 0 {
+		return ErrSyntax
+	}
+
+	return nil
+}
+
+// decodeDQT decodes the Define Quantization Table segment. It parses and stores
+// the 8x8 quantization matrices used for dequantizing DCT coefficients.
+func (d *decoder) decodeDQT() error {
+	if err := d.decodeLength(); err != nil {
+		return err
+	}
+
+	// For resilient decoding: check if we have enough data to actually read the segment.
+	// If not (truncated buffer in DecodeConfig), skip it gracefully.
+	if d.length > d.size {
+		return d.skip(d.size)
+	}
+
+	for d.length > 0 {
+		if d.pos >= len(d.jpegData) {
+			return d.skip(d.length)
+		}
+
+		pq := int(d.jpegData[d.pos]) >> 4   // Precision: 0 = 8-bit values, 1 = 16-bit values.
+		tq := int(d.jpegData[d.pos]) & 0x0F // Table destination identifier.
+
+		if pq > 1 || tq > 3 {
+			return ErrSyntax
+		}
+
+		// A table is one header byte plus 64 8-bit or 128 16-bit values.
+		size := 65
+		if pq == 1 {
+			size = 129
+		}
+
+		if d.length < size {
+			return ErrSyntax
+		}
+		if d.pos+size > len(d.jpegData) {
+			return d.skip(d.length)
+		}
+
+		d.qtAvail |= 1 << tq
+		t := d.qtab[tq]
+
+		// Pooling: Clear the table before filling it.
+		*t = [64]uint16{}
+
+		for j := 0; j < 64; j++ {
+			// Read value in zigzag order from the stream, store in natural order for dequantization.
+			var val uint16
+			if pq == 0 {
+				val = uint16(d.jpegData[d.pos+1+j])
+			} else {
+				val = uint16(d.jpegData[d.pos+1+2*j])<<8 | uint16(d.jpegData[d.pos+2+2*j])
+			}
+			t[zz[j]] = val
+		}
+
+		if err := d.skip(size); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// decodeDRI decodes the Define Restart Interval segment. This specifies how often
+// restart markers are embedded in the scan data for error resilience.
+func (d *decoder) decodeDRI() error {
+	if err := d.decodeLength(); err != nil {
+		return err
+	}
+
+	if d.length < 2 || d.size < 2 {
+		return ErrSyntax
+	}
+
+	d.rstInterval = d.decode16(0)
+
+	return d.skip(d.length)
+}
+
+// convert handles upsampling of chroma components (if needed) and converts the final YCbCr/RGB pixel data to RGBA format.
+func (d *decoder) convert() error {
+	return d.convertComps(&d.comp, d.pixels, d.width, d.height)
+}
+
+// convertComps converts comp, which it may upsample in place, to RGBA in dst.
+func (d *decoder) convertComps(comp *[4]component, dst []byte, width, height int) error {
+	if d.ncomp == 4 {
+		if !d.adobeTransformValid {
+			return ErrUnsupported
+		}
+
+		d.cmykRows(comp, dst, width*4, width, height)
+
+		for i := 0; i < width*height*4; i += 4 {
+			p := dst[i : i+4 : i+4]
+			p[0], p[1], p[2] = color.CMYKToRGB(p[0], p[1], p[2], p[3])
+			p[3] = 255
+		}
+
+		return nil
+	}
+
+	if d.ncomp == 3 && !d.isRGB &&
+		yCbCrToRGBAUpsampled(&comp[0], &comp[1], &comp[2], dst, width, height, d.upsampleMethod) {
+		return nil
+	}
+
+	for i := 0; i < d.ncomp; i++ {
+		c := &comp[i]
+
+		if c.width < width || c.height < height {
+			if upsampleCubic(c, width, height, d.upsampleMethod) {
+				upsampleCatmullRom(c, width, height)
+			} else {
+				upsampleNearestNeighbor(c, width, height)
+			}
+		}
+
+		if c.width < width || c.height < height {
+			return ErrInternal
+		}
+	}
+
+	if d.ncomp == 3 {
+		if d.isRGB {
+			// RGB to RGBA conversion
+			rgbToRGBA(&comp[0], &comp[1], &comp[2], dst, width, height)
+		} else {
+			// YCbCr to RGBA conversion
+			yCbCrToRGBA(&comp[0], &comp[1], &comp[2], dst, width, height)
+		}
+	} else if d.ncomp == 1 {
+		// Grayscale to RGBA conversion
+		grayToRGBA(&comp[0], dst, width, height)
+	}
+
+	return nil
+}
+
+// rgbOutput reports samples that are already RGB, which only a three
+// component frame can carry.
+func (d *decoder) rgbOutput() bool {
+	return d.isRGB && d.ncomp == 3
+}
+
+// transform applies rotation and flipping to the decoded RGBA image based on the EXIF orientation tag.
+func (d *decoder) transform() {
+	d.pixels, d.width, d.height = orientRGBA(d.pixels, d.width, d.height, d.orientation)
+}
+
+// orientTile is the tile edge in pixels.
+const orientTile = 32
+
+// orientRGBA applies an EXIF orientation to a tightly packed w*h RGBA buffer.
+func orientRGBA(src []byte, w, h, orientation int) ([]byte, int, int) {
+	le := binary.LittleEndian
+
+	if orientation == 3 {
+		for i, j := 0, len(src)-4; i < j; i, j = i+4, j-4 {
+			a, b := le.Uint32(src[i:]), le.Uint32(src[j:])
+			le.PutUint32(src[i:], b)
+			le.PutUint32(src[j:], a)
+		}
+
+		return src, w, h
+	}
+
+	var base, stepX, stepY int
+
+	switch orientation {
+	case 2: // Flip horizontal
+		base, stepX, stepY = w-1, -1, w
+	case 4: // Flip vertical
+		base, stepX, stepY = (h-1)*w, 1, -w
+	case 5: // Transpose (Flip along TL-BR diagonal)
+		base, stepX, stepY = 0, h, 1
+	case 6: // Rotate 90 CW
+		base, stepX, stepY = h-1, h, -1
+	case 7: // Transverse (Flip along TR-BL diagonal)
+		base, stepX, stepY = w*h-1, -h, -1
+	case 8: // Rotate 270 CW (90 CCW)
+		base, stepX, stepY = (w-1)*h, -h, 1
+	default:
+		return src, w, h
+	}
+
+	base, stepX, stepY = base*4, stepX*4, stepY*4
+
+	dst := make([]byte, len(src))
+
+	for ty := 0; ty < h; ty += orientTile {
+		yEnd := min(ty+orientTile, h)
+
+		for tx := 0; tx < w; tx += orientTile {
+			xEnd := min(tx+orientTile, w)
+
+			for sy := ty; sy < yEnd; sy++ {
+				row := src[(sy*w+tx)*4 : (sy*w+xEnd)*4]
+				o := base + sy*stepY + tx*stepX
+
+				for i := 0; i < len(row); i += 4 {
+					le.PutUint32(dst[o:], le.Uint32(row[i:]))
+					o += stepX
+				}
+			}
+		}
+	}
+
+	if orientation >= 5 {
+		return dst, h, w
+	}
+
+	return dst, w, h
+}
+
+// decode reads the JPEG stream from a byte slice, parses all segments, decodes the scan data, and performs color conversion.
+// If configOnly is true, it stops after reading the image metadata (SOF marker).
+func (d *decoder) decode(jpegData []byte, configOnly bool) (image.Image, error) {
+	d.jpegData = jpegData
+	d.pos = 0
+	d.size = len(jpegData)
+	d.orientation = 1 // Default orientation (Top-Left)
+
+	// Check for SOI (Start of Image) marker.
+	if d.size < 2 || d.jpegData[0] != 0xFF || d.jpegData[1] != 0xD8 {
+		return nil, ErrNoJPEG
+	}
+	d.pos += 2
+	d.size -= 2
+
+	var sofDecoded bool
+	var scansCompleted int
+
+markerLoop:
+	for {
+		// Check if there's enough data for a marker before starting the search.
+		if d.size < 2 {
+			return nil, ErrSyntax
+		}
+
+		// Find the next marker introducer (0xFF).
+		idx := bytes.IndexByte(d.jpegData[d.pos:d.pos+d.size], 0xFF)
+		if idx == -1 {
+			return nil, ErrSyntax // No marker found in remaining data.
+		}
+
+		// Advance position past any stray data to the 0xFF.
+		d.pos += idx
+		d.size -= idx
+
+		// We have at least one 0xFF at d.pos. Find the marker code that follows it, skipping any fill bytes (0xFF).
+		searchPos := d.pos + 1
+		for searchPos < d.pos+d.size && d.jpegData[searchPos] == 0xFF {
+			searchPos++
+		}
+
+		// Check if we ran out of data while skipping fill bytes.
+		if searchPos >= d.pos+d.size {
+			return nil, ErrSyntax
+		}
+
+		// We found a non-0xFF byte, which is our marker code.
+		marker := d.jpegData[searchPos]
+
+		// Advance the main decoder position past all the skipped 0xFFs and the marker code.
+		consumedBytes := (searchPos + 1) - d.pos
+		d.pos += consumedBytes
+		d.size -= consumedBytes
+
+		switch marker {
+		// SOF0 baseline, SOF1 extended sequential, and SOF9 arithmetic, which is
+		// attempted with Huffman tables rather than rejected.
+		case 0xC0, 0xC1, 0xC9:
+			if sofDecoded {
+				return nil, ErrSyntax
+			}
+
+			d.isArith = marker == 0xC9
+
+			d.isBaseline = true
+			d.isProgressive = false
+
+			if err := d.decodeSOF(configOnly); err != nil {
+				return nil, err
+			}
+			sofDecoded = true
+
+			if configOnly {
+				break markerLoop
+			}
+
+		case 0xC2: // SOF2 (Start of Frame, Progressive DCT)
+			if sofDecoded {
+				return nil, ErrSyntax
+			}
+			d.isProgressive = true
+			d.isBaseline = false
+			if err := d.decodeSOF(configOnly); err != nil {
+				return nil, err
+			}
+			sofDecoded = true
+			if configOnly {
+				break markerLoop
+			}
+
+		case 0xC4: // DHT
+			if err := d.decodeDHT(); err != nil {
+				return nil, err
+			}
+
+		case 0xDB: // DQT
+			if err := d.decodeDQT(); err != nil {
+				return nil, err
+			}
+
+		case 0xDD: // DRI
+			if err := d.decodeDRI(); err != nil {
+				return nil, err
+			}
+
+		case 0xDA: // SOS
+			if !sofDecoded {
+				return nil, ErrSyntax
+			}
+
+			if d.probe {
+				d.atSOS = true
+				break markerLoop
+			}
+
+			if err := d.decodeScan(); err != nil {
+				return nil, err
+			}
+			scansCompleted++
+
+		case 0xFE: // COM
+			if err := d.skipMarker(); err != nil {
+				return nil, err
+			}
+
+		case 0xD9: // EOI
+			break markerLoop
+
+		case 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7: // RSTn outside scan: ignore
+			continue
+
+		default:
+			if marker >= 0xE0 && marker <= 0xEF { // APPn
+				if marker == 0xE1 { // APP1 (EXIF)
+					if err := d.decodeAPP1(); err != nil {
+						return nil, err
+					}
+				} else if marker == 0xEE { // APP14 (Adobe)
+					if err := d.decodeAPP14(); err != nil {
+						return nil, err
+					}
+				} else {
+					if err := d.skipMarker(); err != nil {
+						return nil, err
+					}
+				}
+			} else {
+				// Handle unknown or unsupported markers.
+
+				// Skip DAC (Define Arithmetic Coding) marker for resilient decoding.
+				// We'll attempt Huffman decoding even if the image claims to use arithmetic coding.
+				if marker == 0xCC { // DAC
+					if err := d.skipMarker(); err != nil {
+						return nil, err
+					}
+					continue
+				}
+
+				// Unsupported SOF markers (C3, C5-C8, CA-CB, CD-CF); C0, C1, C2, C9
+				// and C4 (DHT) are handled above.
+				if marker >= 0xC0 && marker <= 0xCF {
+					if !sofDecoded {
+						// If this is the first SOF and it's unsupported, reject the image.
+						return nil, ErrUnsupported
+					}
+					// If we already saw a SOF, we will skip this one below.
+				}
+
+				// Handle standalone markers (no length field).
+				if marker == 0x01 { // TEM (Temporary private use)
+					continue
+				}
+
+				// If we encounter 0x00 here, it usually means the previous scan parsing was incorrect
+				// (read a stuffed 0xFF00 as marker 0x00 due to synchronization loss).
+				if marker == 0x00 {
+					return nil, ErrSyntax
+				}
+
+				// Skip unknown markers that have a length field (DNL, EXP, JPGn, etc.).
+				if err := d.skipMarker(); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	if !sofDecoded {
+		return nil, ErrSyntax
+	}
+
+	if configOnly || d.atSOS {
+		return nil, nil
+	}
+
+	if scansCompleted == 0 {
+		return nil, ErrSyntax
+	}
+
+	// Post-process progressive coefficients (dequantize + IDCT).
+	if d.isProgressive {
+		if err := d.postProcessProgressive(); err != nil {
+			return nil, err
+		}
+	}
+
+	needsRotation := d.autoRotate && d.orientation > 1
+	needsRGBA := d.toRGBA || d.rgbOutput() || needsRotation
+
+	if needsRGBA {
+		if d.pixels == nil && (d.width > 0 && d.height > 0) {
+			return nil, ErrInternal
+		}
+
+		if err := d.convert(); err != nil {
+			return nil, err
+		}
+
+		if needsRotation {
+			d.transform()
+		}
+
+		return &image.RGBA{
+			Pix:    d.pixels,
+			Stride: d.width * 4,
+			Rect:   image.Rect(0, 0, d.width, d.height),
+		}, nil
+	}
+
+	// Native output
+	rect := image.Rect(0, 0, d.width, d.height)
+
+	switch d.ncomp {
+	case 1:
+		return &image.Gray{
+			Pix:    d.comp[0].pixels,
+			Stride: d.comp[0].stride,
+			Rect:   rect,
+		}, nil
+	case 3:
+		return &image.YCbCr{
+			Y:              d.comp[0].pixels,
+			Cb:             d.comp[1].pixels,
+			Cr:             d.comp[2].pixels,
+			YStride:        d.comp[0].stride,
+			CStride:        d.comp[1].stride,
+			SubsampleRatio: d.subsampleRatio,
+			Rect:           rect,
+		}, nil
+	case 4:
+		return d.convertToCMYK()
+	default:
+		return nil, ErrInternal
+	}
+}
+
+// convertToCMYK converts a 4-component image per the Adobe APP14 transform.
+func (d *decoder) convertToCMYK() (image.Image, error) {
+	if !d.adobeTransformValid {
+		return nil, ErrUnsupported
+	}
+
+	img := image.NewCMYK(image.Rect(0, 0, d.width, d.height))
+	d.cmykRows(&d.comp, img.Pix, img.Stride, d.width, d.height)
+
+	return img, nil
+}
+
+// cmykRows writes the first height rows of comp as CMYK, per the Adobe transform.
+// A component is sampled by its ratio to the largest sampling factor.
+func (d *decoder) cmykRows(comp *[4]component, pix []byte, stride, width, height int) {
+	mx, my := 1, 1
+	for i := 0; i < 4; i++ {
+		mx, my = max(mx, comp[i].ssX), max(my, comp[i].ssY)
+	}
+
+	var rx, ry [4]int
+	for i := 0; i < 4; i++ {
+		rx[i], ry[i] = mx/comp[i].ssX, my/comp[i].ssY
+	}
+
+	// YCbCrK case: Convert YCbCr to RGB, treat RGB as CMY, apply inverted K
+	if d.adobeTransform == 2 {
+		// Convert YCbCr to RGB, which becomes CMY (RGB inversion cancels Adobe inversion)
+		for y := 0; y < height; y++ {
+			for x := 0; x < width; x++ {
+				// Get YCbCr values
+				yy := comp[0].pixels[(y/ry[0])*comp[0].stride+x/rx[0]]
+				cb := comp[1].pixels[(y/ry[1])*comp[1].stride+x/rx[1]]
+				cr := comp[2].pixels[(y/ry[2])*comp[2].stride+x/rx[2]]
+				kk := comp[3].pixels[(y/ry[3])*comp[3].stride+x/rx[3]]
+
+				// YCbCr to RGB conversion
+				yy1 := int32(yy)
+				cb1 := int32(cb) - 128
+				cr1 := int32(cr) - 128
+
+				r := yy1 + (91881*cr1)>>16
+				g := yy1 - ((22554*cb1 + 46802*cr1) >> 16)
+				b := yy1 + (116130*cb1)>>16
+
+				// Clamp to [0, 255]
+				if r < 0 {
+					r = 0
+				} else if r > 255 {
+					r = 255
+				}
+				if g < 0 {
+					g = 0
+				} else if g > 255 {
+					g = 255
+				}
+				if b < 0 {
+					b = 0
+				} else if b > 255 {
+					b = 255
+				}
+
+				// RGB becomes CMY (no inversion), K is inverted
+				offset := y*stride + x*4
+				pix[offset+0] = uint8(r) // C
+				pix[offset+1] = uint8(g) // M
+				pix[offset+2] = uint8(b) // Y
+				pix[offset+3] = 255 - kk // K (inverted)
+			}
+		}
+		return
+	}
+
+	// CMYK case (adobeTransform == 0): Interleave channels with inversion
+	for i := 0; i < 4; i++ {
+		c := &comp[i]
+
+		for y := 0; y < height; y++ {
+			row := c.pixels[(y/ry[i])*c.stride:]
+			for x := 0; x < width; x++ {
+				// Adobe inversion: 255 - value
+				pix[y*stride+x*4+i] = 255 - row[x/rx[i]]
+			}
+		}
+	}
+}

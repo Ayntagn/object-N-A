@@ -1,5 +1,6 @@
 
   const vegaSelector = "[data-vega-preview]";
+  const localVegaURL = /^cyberwriter-local-assets:\/\/localhost\/[A-Z2-7]{26,}$/;
   const vegaViews = new WeakMap();
   let vegaFormatsReady = false;
 
@@ -69,7 +70,46 @@
     node.append(status);
   }
 
-  async function renderVegaChart(node, embed, options) {
+  async function hydrateLocalVegaValues(spec, loads) {
+    const pending = [];
+    function visit(value) {
+      if (!value || typeof value !== "object") return;
+      if (Array.isArray(value)) {
+        for (const child of value) visit(child);
+        return;
+      }
+      for (const [key, child] of Object.entries(value)) {
+        if (key === "values") continue;
+        if (key === "data") {
+          for (const data of Array.isArray(child) ? child : [child]) {
+            const url = data?.url;
+            if (typeof url !== "string" || !localVegaURL.test(url)) continue;
+            let loaded = loads.get(url);
+            if (!loaded) {
+              loaded = (async () => {
+                const response = await fetch(url, {credentials: "omit"});
+                if (!response.ok) throw new Error("Unavailable local chart data");
+                return {
+                  text: new TextDecoder("utf-8", {ignoreBOM: true}).decode(await response.arrayBuffer()),
+                  json: response.headers.get("Content-Type") === "application/json",
+                };
+              })();
+              loads.set(url, loaded);
+            }
+            pending.push(loaded.then(({text, json}) => {
+              data.values = json ? JSON.parse(text) : text;
+              delete data.url;
+            }));
+          }
+        }
+        visit(child);
+      }
+    }
+    visit(spec);
+    await Promise.all(pending);
+  }
+
+  async function renderVegaChart(node, embed, options, localLoads) {
     node.dataset.vegaDone = "pending";
     let spec;
     try {
@@ -97,6 +137,7 @@
     stage.className = "vega-stage";
     node.append(stage);
     try {
+      if (node.hasAttribute("data-vega-scoped-values")) await hydrateLocalVegaValues(spec, localLoads);
       const result = await embed(stage, spec, {
         actions: false, mode, renderer: "svg", config: vegaConfig(), ast: true, loader: vegaDataLoader(options),
       });
@@ -124,7 +165,9 @@
       vegaFormatsReady = true;
     }
     const pending = preview.querySelectorAll(vegaSelector + ":not([data-vega-done])");
-    await Promise.all(Array.from(pending, node => renderVegaChart(node, embed, options)));
+    if (!pending.length) return;
+    const localLoads = new Map();
+    await Promise.all(Array.from(pending, node => renderVegaChart(node, embed, options, localLoads)));
   }
 
   window.addEventListener("cyberwriter:vega-ready", () =>

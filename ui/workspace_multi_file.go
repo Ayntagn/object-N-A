@@ -282,7 +282,7 @@ func (app *workspaceWindow) drawMultiFileMarkdown(c *mygoui.Context, tab *worksp
 			app.selectMultiFileTile(tab)
 		}
 	}).Children(func() {
-		markdown.View(c, nativeHighlightedMarkdown(scroll, body, state.options.Extensions), state.options).FillWidth()
+		nativeMarkdownWithDetails(c, scroll, nativeHighlightedMarkdown(scroll, body, state.options.Extensions), state.options).FillWidth()
 	})
 }
 

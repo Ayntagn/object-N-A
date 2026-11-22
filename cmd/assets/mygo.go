@@ -18,7 +18,7 @@ const (
 	mygoModule  = "github.com/egoist/mygo"
 	mygoVersion = "v0.8.3"
 	mygoSum     = "h1:aTLEhS221YhsX+gKGNLQ5xEKMLCcYYr3pH9AkTwIRs4="
-	mygoDir     = "third_party/mygo-176"
+	mygoDir     = "third_party/mygo-187"
 )
 
 //go:embed mygo/LICENSE mygo

@@ -441,10 +441,12 @@ func (v *view) sync(moved func(cs []change)) bool {
 	}
 	old := v.text
 	v.text, v.version = text, version
-	v.lines.m = nil
 	// The highlighter hears of the edits before a line of the text is
 	// laid out, as moving the caret into view does between frames.
 	v.followHighlighter()
+	if !ok || !v.reuseLines(changes) {
+		v.lines.m = nil
+	}
 	if !ok {
 		// Too far behind the buffer's log to follow its edits: the
 		// changes of the lines between the text it had and the text.
@@ -475,6 +477,32 @@ func (v *view) sync(moved func(cs []change)) bool {
 	}
 	v.heights.setLines(text.LineCount())
 	v.heights.dirty = true
+	return true
+}
+
+// reuseLines keeps the layout of untouched lines during an ordinary
+// edit within one line. Edits can change the syntax state of later
+// lines, so reuse their rows only when their current token faces agree.
+func (v *view) reuseLines(changes [][]change) bool {
+	if len(changes) != 1 || len(changes[0]) != 1 || len(v.inlays) != 0 {
+		return false
+	}
+	if v.hl != nil {
+		if highlighter, ok := v.hl.(*tokenHighlighter); !ok || highlighter.text.version != v.version {
+			return false
+		}
+	}
+	c := changes[0][0]
+	if c.oldLine != c.oldEndLine || c.newLine != c.newEndLine {
+		return false
+	}
+	delete(v.lines.m, c.oldLine)
+	for n, l := range v.lines.m {
+		if n > c.oldLine {
+			l.start += c.newEnd - c.oldEnd
+			l.exact = v.hl == nil
+		}
+	}
 	return true
 }
 

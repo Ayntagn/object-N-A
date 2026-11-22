@@ -28,9 +28,9 @@ func (s Scope) allows(current mode) bool {
 	}
 }
 
-// markdownMode follows the source up to the trigger. Unclosed dollar
-// delimiters count while typing, even before the Markdown parser sees math.
-func markdownMode(prefix string) mode {
+// markdownMode classifies the start of the trigger. Inline math needs a
+// closing dollar on the same line. An open display block still counts while typing.
+func markdownMode(prefix, contents, suffix string) mode {
 	var math mode
 	inlineCode, fenceLength := 0, 0
 	var fence byte
@@ -53,7 +53,16 @@ func markdownMode(prefix string) mode {
 		if more && strings.TrimSpace(line) == "" && math != blockMathMode {
 			inlineCode = 0
 		}
-		for i := 0; i < len(line); {
+		boundary := len(line)
+		if !more && strings.ContainsRune(line, '$') {
+			if first, _, multiline := strings.Cut(contents, "\n"); multiline {
+				line += first
+			} else {
+				tail, _, _ := strings.Cut(suffix, "\n")
+				line = line + contents + tail
+			}
+		}
+		for i := 0; i < boundary; {
 			mark := line[i]
 			if mark == '\\' && inlineCode == 0 && i+1 < len(line) {
 				i += 2
@@ -67,17 +76,16 @@ func markdownMode(prefix string) mode {
 			count := end - i
 			switch {
 			case mark == '`' && math == textMode:
-				if inlineCode == 0 {
-					inlineCode = count
-				} else if inlineCode == count {
-					inlineCode = 0
-				}
+				inlineCode = toggleCodeSpan(inlineCode, count)
 			case mark == '$' && inlineCode == 0:
 				switch {
 				case count == 1 && math == textMode:
-					math = inlineMathMode
-				case count == 1 && math == inlineMathMode:
-					math = textMode
+					if close := inlineMathClose(line, i); close >= 0 {
+						if close >= boundary {
+							return inlineMathMode
+						}
+						end = close + 1
+					}
 				case count == 2 && math == textMode:
 					math = blockMathMode
 				case count == 2 && math == blockMathMode:
@@ -86,14 +94,55 @@ func markdownMode(prefix string) mode {
 			}
 			i = end
 		}
-		if more && math == inlineMathMode {
-			math = textMode
-		}
 	}
 	if fence != 0 || inlineCode != 0 {
 		return codeMode
 	}
 	return math
+}
+
+func inlineMathClose(line string, open int) int {
+	if open+1 == len(line) || mathDelimiterSpace(line[open+1]) {
+		return -1
+	}
+	codeTicks := 0
+	for i := open + 1; i < len(line); i++ {
+		switch line[i] {
+		case '\\':
+			if codeTicks == 0 {
+				i++
+			}
+		case '`':
+			count := runLength(line[i:], '`')
+			codeTicks = toggleCodeSpan(codeTicks, count)
+			i += count - 1
+		case '$':
+			// An unrelated opening dollar, a dollar inside code, or a display
+			// delimiter cannot close this span.
+			if codeTicks != 0 || mathDelimiterSpace(line[i-1]) {
+				return -1
+			}
+			if i+1 < len(line) && (line[i+1] == '$' || (line[i+1] >= '0' && line[i+1] <= '9')) {
+				return -1
+			}
+			return i
+		}
+	}
+	return -1
+}
+
+func mathDelimiterSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\r'
+}
+
+func toggleCodeSpan(open, count int) int {
+	if open == count {
+		return 0
+	}
+	if open == 0 {
+		return count
+	}
+	return open
 }
 
 func fenceMarker(line string) (byte, int, string) {

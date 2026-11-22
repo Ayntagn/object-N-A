@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"time"
 
 	"cyberwriter/internal/core/exportdoc"
@@ -32,7 +33,8 @@ var pdfPaperLoader = previewAssetLoader(`typeof window.PDFLib?.PDFDocument?.load
 type pdfSource struct {
 	Top    float64 `json:"top"`
 	Height float64 `json:"height"`
-	Data   []byte  `json:"data"`
+	Data   []byte  `json:"data,omitempty"`
+	URL    string  `json:"url,omitempty"`
 }
 
 type pdfOutput struct {
@@ -57,7 +59,17 @@ type pdfComposition struct {
 	Links          []pdfLink
 	SystemPrint    bool
 	Unicode        map[string]map[uint16]uint16
+	Upload         *pdfResultUpload `json:",omitempty"`
 }
+
+type pdfResultUpload struct {
+	URL        string `json:"url"`
+	MinBytes   int    `json:"minBytes"`
+	MaxBytes   int    `json:"maxBytes"`
+	ChunkBytes int    `json:"chunkBytes"`
+}
+
+const maxPDFResultUpload = 64 << 20
 
 func composePDF(window *mygo.Window, doc exportDocument, width float64, geometry pdfGeometry, sources []pdfSource) (pdfOutput, error) {
 	paperWidth, paperHeight := doc.layout.Dimensions()
@@ -98,6 +110,46 @@ func composePDF(window *mygo.Window, doc exportDocument, width float64, geometry
 }
 
 func loadPDFSources(ctx context.Context, page *mygo.Page, sources []pdfSource) (map[string]map[uint16]uint16, error) {
+	if pageAssetAvailable(page) {
+		scoped, grants := grantPDFSources(page, sources)
+		if len(grants) > 0 {
+			replacements, err := readPDFSources(ctx, page, scoped)
+			for _, grant := range grants {
+				pageLocalAssets.Revoke(page, grant)
+			}
+			if err == nil || ctx.Err() != nil {
+				return replacements, err
+			}
+		}
+	}
+	return readPDFSources(ctx, page, sources)
+}
+
+func grantPDFSources(page *mygo.Page, sources []pdfSource) ([]pdfSource, []string) {
+	var scoped []pdfSource
+	var grants []string
+	for i, source := range sources {
+		if len(source.Data) < localAssetThreshold {
+			continue
+		}
+		token, ok := pageLocalAssets.AddBytes(page, "application/pdf", source.Data)
+		if !ok {
+			continue
+		}
+		if scoped == nil {
+			scoped = slices.Clone(sources)
+		}
+		scoped[i].Data = nil
+		scoped[i].URL = localAssetOrigin + "/" + token
+		grants = append(grants, token)
+	}
+	if scoped == nil {
+		scoped = sources
+	}
+	return scoped, grants
+}
+
+func readPDFSources(ctx context.Context, page *mygo.Page, sources []pdfSource) (map[string]map[uint16]uint16, error) {
 	encoded, err := json.Marshal(sources)
 	if err != nil {
 		return nil, err
@@ -105,7 +157,13 @@ func loadPDFSources(ctx context.Context, page *mygo.Page, sources []pdfSource) (
 	script := "const chunks = " + string(encoded) + ";\n" + `
 window.cyberwriterPDFSources = [];
 for (const chunk of chunks) {
-  const input = await PDFLib.PDFDocument.load(chunk.data, {updateMetadata: false});
+  let data = chunk.data;
+  if (chunk.url) {
+    const response = await fetch(chunk.url, {credentials: "omit"});
+    if (!response.ok) throw new Error("PDF capture transfer failed");
+    data = new Uint8Array(await response.arrayBuffer());
+  }
+  const input = await PDFLib.PDFDocument.load(data, {updateMetadata: false});
   if (input.getPageCount() !== 1) throw new Error("expected one PDF page per capture");
   window.cyberwriterPDFSources.push({top: chunk.top, height: chunk.height, input});
 }
@@ -172,11 +230,25 @@ func pdfPaperColor(doc exportDocument) [3]float64 {
 }
 
 func buildPDFOutput(ctx context.Context, page *mygo.Page, params pdfComposition) (pdfOutput, error) {
+	var token string
+	if pageAssetAvailable(page) {
+		if grant, ok := pageLocalAssets.ReserveUpload(page, maxPDFResultUpload); ok {
+			token = grant
+			defer pageLocalAssets.Revoke(page, token)
+			params.Upload = &pdfResultUpload{
+				URL: localAssetOrigin + "/" + token, MinBytes: localAssetThreshold,
+				MaxBytes: maxPDFResultUpload, ChunkBytes: localAssetUploadChunkBytes,
+			}
+		}
+	}
 	args, err := json.Marshal(params)
 	if err != nil {
 		return pdfOutput{}, err
 	}
-	var result pdfOutput
+	var result struct {
+		pdfOutput
+		Uploaded bool
+	}
 	script := "const plan = " + string(args) + ";\n"
 	if len(params.Unicode) > 0 {
 		script += pdfUnicodeScript + "\n"
@@ -184,8 +256,15 @@ func buildPDFOutput(ctx context.Context, page *mygo.Page, params pdfComposition)
 	if err := decodePDFScript(ctx, page, script+pdfOutputScript, &result); err != nil {
 		return pdfOutput{}, fmt.Errorf("assemble PDF pages: %w", err)
 	}
+	if result.Uploaded {
+		var ok bool
+		result.Data, ok = pageLocalAssets.TakeUpload(page, token)
+		if !ok {
+			return pdfOutput{}, errors.New("the PDF compositor did not deliver its result")
+		}
+	}
 	if result.Pages < 1 || !bytes.HasPrefix(result.Data, []byte("%PDF-")) {
 		return pdfOutput{}, errors.New("the PDF compositor returned an invalid document")
 	}
-	return result, nil
+	return result.pdfOutput, nil
 }

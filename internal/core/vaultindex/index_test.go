@@ -1,7 +1,8 @@
-// spec: FEAT-001 / EV-UI-009 / EV-UI-025 / EV-UI-030 / EV-EDITOR-004 / EV-UI-188
+// spec: FEAT-001 / EV-UI-009 / EV-UI-025 / EV-UI-030 / EV-EDITOR-004 / EV-UI-188 / EV-MYGO-309
 package vaultindex
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -209,6 +210,51 @@ func TestRefreshReadsSameMetadataRewriteAndResolvesNewTarget(t *testing.T) {
 	}
 	if got := saved.Tags(changing); !slices.Equal(got, []string{"golden"}) {
 		t.Errorf("saved tags with the previous listing = %v, want [golden]", got)
+	}
+}
+
+func TestWorkspaceMetadataSnapshotDoesNotRetainBody(t *testing.T) {
+	root := t.TempDir()
+	const origin = "Origin.md"
+	const target = "Target.md"
+	for name, source := range map[string]string{
+		origin: "---\nstatus: ready\n---\nDistinctive phrase [[Target]] #reference\n",
+		target: "A linked note\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vault, err := workspace.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vault.Close()
+	entries, err := vault.SidebarEntries(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := Build(vault, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := full.RefreshMetadata(vault, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := metadata.notes[metadata.byPath[origin]]
+	if note.lowerBody != "" {
+		t.Errorf("metadata retained the whole note body (%d bytes)", len(note.lowerBody))
+	}
+	if !reflect.DeepEqual(metadata.Graph(), full.Graph()) || !slices.Equal(metadata.Edges(), full.Edges()) ||
+		note.properties["status"].Text != "ready" || !slices.Equal(metadata.Tags(origin), []string{"reference"}) {
+		t.Fatal("workspace metadata changed")
+	}
+	if hits := metadata.SearchSidebar(context.Background(), vault, entries, "distinctive phrase", ""); len(hits) != 1 || hits[0].Entry.Path != origin || hits[0].Snippet == "" {
+		t.Errorf("sidebar body search = %+v", hits)
+	}
+	if got := entryPaths(full.Search("distinctive phrase")); !slices.Equal(got, []string{origin}) {
+		t.Errorf("full snapshot body search = %v", got)
 	}
 }
 

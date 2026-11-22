@@ -42,7 +42,7 @@ func (app *workspaceWindow) mapVault() {
 		var plan vaultindex.VaultMap
 		var scene *drawing.Scene
 		if index == nil {
-			index, err = vaultindex.Build(vault, nil)
+			index, err = index.RefreshMetadata(vault, nil)
 		}
 		if err == nil {
 			plan = index.Map()

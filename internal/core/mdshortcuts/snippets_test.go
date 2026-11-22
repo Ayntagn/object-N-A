@@ -1,4 +1,4 @@
-// spec: FEAT-001 / Markdown Shortcuts (LaTeX Suite static snippets)
+// spec: FEAT-001 / EV-MYGO-302 / Markdown Shortcuts (LaTeX Suite static snippets)
 package mdshortcuts
 
 import (
@@ -30,9 +30,9 @@ func TestParseSnippetsFeedsExistingRuleEngine(t *testing.T) {
 		input Input
 		want  string
 	}{
-		{Input{Markdown: "$A", Start: 2, End: 2, Typed: "2"}, "A_2"},
+		{Input{Markdown: "$A$", Start: 2, End: 2, Typed: "2"}, "A_2"},
 		{Input{Markdown: "$$\nb", Start: 4, End: 4, Typed: "2"}, "block2"},
-		{Input{Markdown: "$x", Start: 1, End: 2, Typed: "U"}, `\\underbrace{x\}_${1}`},
+		{Input{Markdown: "$x$", Start: 1, End: 2, Typed: "U"}, `\\underbrace{x\}_${1}`},
 		{Input{Markdown: "a", Start: 1, End: 1, Typed: "x"}, "priority"},
 		{Input{Typed: "off"}, ""},
 	} {

@@ -33,6 +33,7 @@ func (app *workspaceWindow) setTabDocument(tab *workspaceTab, doc workspace.Docu
 		app.tableGrid = workspaceTableGrid{}
 	}
 	tab.cancelAPIRequests()
+	tab.externalCode = nil
 	tab.wys.reset()
 	tab.drawing = nil
 	tab.document = doc
@@ -84,6 +85,7 @@ func (app *workspaceWindow) activateTab(tab *workspaceTab) {
 		}
 		app.wys.closeTableControls()
 		app.wys.closeBlockControls()
+		app.wys.images.releaseOriginalPixels()
 		app.workspaceTab = tab
 		if app.pdfPreview.form.paper != "" {
 			app.pdfPreview.form = app.documentPDFForm()

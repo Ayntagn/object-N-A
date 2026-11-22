@@ -14,9 +14,10 @@ package_dir=$(cd -P -- "$(dirname -- "$0")" >/dev/null && pwd)
 destination=${2:-"$HOME/Applications"}
 bundle="$destination/object-N-A.app"
 
-mkdir -p "$bundle/Contents/MacOS"
+mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 install -m 755 "$binary" "$bundle/Contents/MacOS/object-n-a"
 install -m 644 "$package_dir/Info.plist" "$bundle/Contents/Info.plist"
+install -m 644 "$package_dir/object-n-a.icns" "$bundle/Contents/Resources/object-n-a.icns"
 plutil -lint "$bundle/Contents/Info.plist"
 codesign --force --sign - "$bundle"
 printf '%s\n' "$bundle"

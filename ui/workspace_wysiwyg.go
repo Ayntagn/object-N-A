@@ -228,8 +228,9 @@ func (w *workspaceWYSIWYG) visualSurface(c *mygoui.Context, app *workspaceWindow
 	edit := richtext.Editor(c.Key("visual-editor"), document, richtext.EditorOptions{
 		Label: "WYSIWYG editor", Font: font,
 		Theme: theme, ReadOnly: app.modalOpen || streaming,
+		OnInput:        func(event mygoui.InputEvent) bool { return w.pairVisualInput(app, document, event) },
 		TransformInput: visualMixedLanguageInput,
-		OnPaste:        func(start, end int) bool { return w.pasteVisualImage(app, services, start, end) },
+		OnPaste:        func(start, end int) bool { return w.pasteVisualNote(app, services, start, end) },
 		OnLink:         func(target string) { w.followLink(app, target) },
 		OnLinkCommand:  func() { w.format(app, linkFormat) },
 		TagStyle:       w.visualTagStyle,
@@ -252,6 +253,14 @@ func (w *workspaceWYSIWYG) visualSurface(c *mygoui.Context, app *workspaceWindow
 	}
 	text := document.Text()
 	anchor, caret := document.Selection()
+	if w.editable(app) {
+		formula, namedCode := wysiwyg.FormulaAt(text, min(anchor, caret))
+		if text.ParagraphStyleAt(caret).CodeBlock || (namedCode && formula.Block && !formula.IsLaTeX()) {
+			edit.OnShortcut(mygoui.Cmd|mygoui.Alt, mygoui.KeyE, func() {
+				w.editVisualCodeExternally(app, min(anchor, caret))
+			})
+		}
+	}
 	viewport := edit.Bounds()
 	viewportWidth := viewport.W
 	boxes := document.VisibleParagraphs()
@@ -438,9 +447,10 @@ func (w *workspaceWYSIWYG) readOnly(c *mygoui.Context, app *workspaceWindow, pad
 	for level, size := range wysHeadingSizes {
 		theme.Headings[level].Size = size
 	}
-	mygoui.Scroll(c).Grow(1).MinHeight(0).FillWidth().Padding(24, padding).
-		Label("WYSIWYG read-only preview").Children(func() {
-		markdown.View(c, w.session.Body, &markdown.Options{
+	scroll := mygoui.Scroll(c).Grow(1).MinHeight(0).FillWidth().Padding(24, padding).
+		Label("WYSIWYG read-only preview")
+	scroll.Children(func() {
+		nativeMarkdownWithDetails(c, scroll, w.session.Body, &markdown.Options{
 			Theme: theme, Extensions: wysiwyg.Extensions, OnLink: openVisualLink,
 		})
 	})

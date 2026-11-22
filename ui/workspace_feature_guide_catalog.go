@@ -172,9 +172,9 @@ var featureGuideSections = []featureGuideSection{
 			points: []string{"Select a heading in the outline to reveal its position in the current document."}},
 	}},
 	{"Editor", "编辑器", []featureGuideCard{
-		{id: "smartpaste", title: "Smart Paste", summary: "Paste plain text or formatted material, then check the Markdown the editor produced.",
-			hints:    []string{"⌘ V", "Switch to WYSIWYG for rich clipboard text", "Review the source after pasting"},
-			points:   []string{"For tables, use the table editor when the clipboard format needs correction."},
+		{id: "smartpaste", title: "Smart Paste", summary: "Paste Markdown or formatted text and keep headings, lists, and code.",
+			hints:    []string{"⌘ V", "Source, Split, or WYSIWYG"},
+			points:   []string{"Paste a Markdown table into WYSIWYG to edit its cells."},
 			keywords: "paste clipboard markdown rich html rtf word excel spreadsheet table convert plain"},
 		{id: "selectiontoolbar", title: "Selection Toolbar", summary: "The original shows formatting tools next to a selected passage.",
 			hints:    []string{"Select text", "Use the editor toolbar to format it"},

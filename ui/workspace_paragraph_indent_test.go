@@ -1,4 +1,4 @@
-// spec: v0.2.0 Source leading spaces and U+3000 paragraph indentation / U75 / EV-MYGO-250, EV-MYGO-251.
+// spec: Source leading spaces and U+3000 paragraph indentation / U75 / EV-MYGO-250, EV-MYGO-251, EV-MYGO-296.
 package ui
 
 import (
@@ -28,10 +28,57 @@ func TestAutoIndentParagraphsTypesAndUndoesInSplit(t *testing.T) {
 	if !app.code.Run(editor.Undo) || app.draft.String() != initial || app.code.Cursor() != len(initial) {
 		t.Fatalf("undo did not restore paragraph and caret: %q, %d", app.draft.String(), app.code.Cursor())
 	}
-	test.SetClipboard("粘贴")
+	const prose = "UNIX 管道用于连接进程。"
+	const rest = "\n\n    printf('code')\n\n　　已缩进的段落。"
+	test.SetClipboard(prose + rest)
 	test.Command("paste")
-	if got := app.draft.String(); got != initial+"粘贴" {
-		t.Fatalf("paste: got %q", got)
+	if got, want := app.draft.String(), initial+paragraphIndent+prose+rest; got != want {
+		t.Fatalf("paste: got %q, want %q", got, want)
+	}
+	test.Command("undo")
+	if got := app.draft.String(); got != initial || app.code.Cursor() != len(initial) {
+		t.Fatalf("paste undo got %q at %d, want %q at %d", got, app.code.Cursor(), initial, len(initial))
+	}
+}
+
+func TestAutoIndentParagraphsConvertsFourthSpaceBeforeChineseProse(t *testing.T) {
+	const heading = "# 示例🙂\n\n"
+	const prose = "UNIX 管道用于连接进程。"
+	app, test, _ := snippetsWorkspace(t, "Prose.md", heading+prose, splitMode)
+	app.preferences.AutoIndentParagraphs = true
+	app.code.Select(len(heading), len(heading))
+	for range 4 {
+		test.TypeKey(0, mygoui.KeySpace, " ")
+	}
+	if got, want := app.draft.String(), heading+paragraphIndent+prose; got != want {
+		t.Fatalf("manual indentation: got %q, want %q", got, want)
+	}
+	body, _ := renderPreview(parser.New(webPreviewExtensions), app.draft.String(), "Prose")
+	if !strings.Contains(body, "<p>"+paragraphIndent+prose+"</p>") {
+		t.Fatalf("preview did not render the indented paragraph: %q", body)
+	}
+	test.Command("undo")
+	if got, want := app.draft.String(), heading+"   "+prose; got != want || app.code.Cursor() != len(heading)+3 {
+		t.Fatalf("undo got %q at %d, want %q at %d", got, app.code.Cursor(), want, len(heading)+3)
+	}
+}
+
+func TestAutoIndentParagraphsConvertsManualSpacesAtFirstProseInput(t *testing.T) {
+	const initial = "# 示例🙂\n\n"
+	app, test, _ := snippetsWorkspace(t, "Prose.md", initial, sourceMode)
+	app.preferences.AutoIndentParagraphs = true
+	app.code.Select(len(initial), len(initial))
+	for range 4 {
+		test.TypeKey(0, mygoui.KeySpace, " ")
+	}
+	test.Compose("ni", 2)
+	test.Type("你好")
+	if got, want := app.draft.String(), initial+paragraphIndent+"你好"; got != want {
+		t.Fatalf("committed prose: got %q, want %q", got, want)
+	}
+	test.Command("undo")
+	if got, want := app.draft.String(), initial+"    "; got != want || app.code.Cursor() != len(want) {
+		t.Fatalf("undo got %q at %d, want %q at %d", got, app.code.Cursor(), want, len(want))
 	}
 }
 
@@ -108,11 +155,17 @@ func TestAutoIndentParagraphsKeepsMarkdownStructure(t *testing.T) {
 	app.code.GoTo(editor.Pos{Line: 2})
 	test.Type("title")
 	app.code.GoTo(editor.Pos{Line: 6})
-	test.Type("code")
+	test.SetClipboard("code\n\n最后一行")
+	test.Command("paste")
+	app.code.GoTo(editor.Pos{Line: 7})
+	for range 4 {
+		test.TypeKey(0, mygoui.KeySpace, " ")
+	}
+	test.Type("注释")
 	app.code.Select(app.draft.Len(), app.draft.Len())
 	test.Type("#")
 	test.Type(" Heading")
-	if got, want := app.draft.String(), "---\ntitle: Example\ntitle\n---\n\n~~~md\ncode\n~~~\n\n# Heading"; got != want {
+	if got, want := app.draft.String(), "---\ntitle: Example\ntitle\n---\n\n~~~md\ncode\n    注释\n最后一行\n~~~\n\n# Heading"; got != want {
 		t.Fatalf("structure: got %q, want %q", got, want)
 	}
 }

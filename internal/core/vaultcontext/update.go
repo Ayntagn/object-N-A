@@ -65,7 +65,7 @@ func UpdateFast(ctx context.Context, previous *Index, paths []string, changed []
 			if err != nil {
 				return nil, err
 			}
-			chunk.Vector = tfidf(terms, previous.data.Frequencies, corpus)
+			chunk.setVector(tfidf(terms, previous.data.Frequencies, corpus))
 			progress(at + 1)
 		}
 		return index, nil

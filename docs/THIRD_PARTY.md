@@ -9,8 +9,8 @@
 | go-text/typesetting segmenter | v0.3.5 | 使用 MyGo 已引入的字素簇分段器裁剪片段标题、计算 GLOW 字符数、匹配快速切换的文件名及检查 Vault Health 与 Unlinked Mentions 的短名称 | BSD-3-Clause 或 Unlicense | [go-text/typesetting v0.3.5](https://github.com/go-text/typesetting/tree/v0.3.5) | 否 | 其他 Unicode 字素簇分段器 |
 | Go `x/image/colornames` | v0.46.0 | 使用 MyGo 已引入的 CSS 颜色名称表为行内公式解析颜色后缀 | BSD-3-Clause | [Go colornames](https://pkg.go.dev/golang.org/x/image@v0.46.0/colornames) | 否 | 系统 WebView 解析 CSS 颜色 |
 | Go `x/net/html` | v0.59.0 | 使用 MyGo 已引入的 HTML 解析器保留文档结构、安装预览策略并校验独立导出的 Markdown HTML 格式块 | BSD-3-Clause | [Go HTML](https://pkg.go.dev/golang.org/x/net@v0.59.0/html) | 否 | WebView 内的标准 HTML 解析器 |
-| Go `x/sys` | v0.48.0 | GLOW 文件和目录移动调用各平台的原子不覆盖重命名 | BSD-3-Clause | [Go x/sys v0.48.0](https://github.com/golang/sys/tree/v0.48.0) | 否 | 分别绑定系统重命名接口 |
-| Go `x/text` | v0.43.0 | Unicode 大小写处理、规范化及排序，用于 GLOW 脚本断言、快速切换文件、Vault 查询及 Vault Health | BSD-3-Clause | [Go x/text v0.43.0](https://github.com/golang/text/tree/v0.43.0) | 否 | 其他 Unicode 规范化及排序实现 |
+| Go `x/sys` | v0.50.0 | 各平台文件、设备和系统接口 | BSD-3-Clause | [Go x/sys v0.50.0](https://github.com/golang/sys/tree/v0.50.0) | 否 | 分别绑定操作系统接口 |
+| Go `x/text` | v0.44.0 | Unicode 大小写处理、规范化及排序，用于文件选择和 Vault 查询 | BSD-3-Clause | [Go x/text v0.44.0](https://github.com/golang/text/tree/v0.44.0) | 否 | 其他 Unicode 规范化及排序实现 |
 | Go YAML v3 | v3.0.5 | Properties 侧栏的有序 YAML 节点解析和改写，保留字段类型、flow 样式和注释 | MIT 与 Apache-2.0 | [go.yaml.in/yaml/v3](https://pkg.go.dev/go.yaml.in/yaml/v3@v3.0.5) | 否 | 旧的标签提取器只提供索引读取 |
 | BurntSushi/toml | v1.6.0 | Properties 侧栏读写 TOML frontmatter | MIT | [BurntSushi/toml v1.6.0](https://github.com/BurntSushi/toml/tree/v1.6.0) | 否 | 其他纯 Go TOML 编解码器 |
 | JetBrains Mono | 2.305 | 源文推荐字体及 PDF 导出可选字体 | SIL OFL 1.1 | [JetBrains 字库提交](https://github.com/JetBrains/JetBrainsMono/tree/02bb50b082dad9ef8a0f33ac393839202b760223/fonts/ttf) · [许可](../ui/fonts/JetBrainsMono.OFL.txt) | 否 | 系统等宽 |
@@ -26,7 +26,12 @@
 | Mermaid 浏览器发行物 | 12.3.0 | Markdown 预览、WYSIWYG 图表卡片、PDF 和 Share HTML 的离线 SVG、DOCX 的 PNG 快照和 Map Vault 的 Dagre 布局 | MIT，附带组件保留上游许可与版权注释 | [Mermaid 12.3.0](https://github.com/mermaid-js/mermaid/releases/tag/mermaid%4012.3.0) · [许可文件](../ui/webassets/mermaid/LICENSE) | 否 | Markdown 围栏的源码与离线渲染 |
 | Vega、Vega-Lite、Vega-Embed 浏览器发行物 | 5.33.1、5.23.0、6.29.0 | Markdown 预览、WYSIWYG、PDF 和独立 HTML 的 SVG 图表及表达式解释器 | BSD-3-Clause，保留发行物版权注释 | [Vega](https://github.com/vega/vega/releases/tag/v5.33.1) · [Vega-Lite](https://github.com/vega/vega-lite/releases/tag/v5.23.0) · [Vega-Embed](https://github.com/vega/vega-embed/tree/v6.29.0) | 否 | 现有 fenced code 预览 |
 | d3-dsv | 3.0.1 | Vega 渲染的 CSV、TSV 和 DSV 逐行解析 | ISC | [d3-dsv 3.0.1](https://github.com/d3/d3-dsv/tree/v3.0.1) · [许可](../ui/webassets/vega/d3-dsv-LICENSE) | 否 | Go CSV 解析与自定义浏览器读入 |
+| jpegn | v0.7.1 | `jpegscale` 复用缩小 IDCT、熵解码和 SIMD 内核 | MIT | [jpegn v0.7.1](https://github.com/gen2brain/jpegn/tree/v0.7.1) · [许可](../third_party/jpegscale/internal/jpegn/LICENSE) | 否 | 标准库完整解码后缩小 |
+| Go PNG 解滤波 | Go 标准库 | `pngscale` 在读取 PNG 扫描线时复用解滤波逻辑 | BSD-3-Clause | [Go PNG](https://go.dev/src/image/png/) · [许可](../third_party/pngscale/LICENSE) | 否 | 标准库完整解码后缩小 |
+| ncruces/go-sqlite3、go-sqlite3-wasm、julianday | v0.38.0、v6.7.35401、v1.0.0 | Vault 短词候选索引及底层 SQLite 运行时 | MIT、MIT-0、MIT | [go-sqlite3](https://github.com/ncruces/go-sqlite3/tree/v0.38.0) · [go-sqlite3-wasm](https://github.com/ncruces/go-sqlite3-wasm) · [julianday](https://github.com/ncruces/julianday/tree/v1.0.0) | 否 | 读取笔记正文进行匹配 |
 
 运行依赖和校验由 [go.mod](../go.mod) 与 [go.sum](../go.sum) 固定。供嵌入的浏览器组件和字库由 `go run ./cmd/assets` 获取和核验。各资源目录保留对应许可证。
 
-`go run ./cmd/assets` 同时通过 Go 模块工具下载 MyGo v0.8.3 源码，并应用本仓库的兼容源码。改动涵盖软折行、输入法、跨平台文件拖放、富文本粘贴及 Markdown 排版，按上游 MIT 许可分发。 [兼容源码与许可](../cmd/assets/mygo)
+`go run ./cmd/assets` 同时通过 Go 模块工具下载 MyGo v0.8.3 源码，并应用本仓库的兼容源码。改动涵盖编辑器输入与辅助功能、跨平台文件拖放、富文本粘贴、Markdown 排版和位图缓存，按上游 MIT 许可分发。 [兼容源码与许可](../cmd/assets/mygo)
+
+应用图标由项目提供，用于 README 及三平台应用入口。 [图标](../ui/app_icon.png)
