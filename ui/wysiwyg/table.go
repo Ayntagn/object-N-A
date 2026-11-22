@@ -41,6 +41,7 @@ func (s *Session) EditTable(index int) *TableEdit {
 }
 
 func (s *Session) NewTable() *TableEdit {
+	s.materializeProjection()
 	return &TableEdit{draft: s.draft, version: s.draftVersion, source: s.source}
 }
 

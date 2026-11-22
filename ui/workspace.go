@@ -144,15 +144,23 @@ type workspaceTab struct {
 	properties            workspaceProperties
 	aiContext             *workspaceAIContext
 	apiRequests           map[*apiRequestTarget]context.CancelFunc
+	externalCode          *externalCodeEdit
 }
 
 // Run opens the workspace window and runs the MyGo event loop.
 func Run(initialVault string) error {
+	if err := registerPreviewImageProtocol(); err != nil {
+		return err
+	}
+	if err := registerPageAssetProtocol(); err != nil {
+		return err
+	}
 	preferences, preferencesErr := loadWorkspacePreferences()
 	application := &workspaceApplication{preferences: preferences}
 	mygo.App.SetName(applicationName)
 	mygo.App.SetWindowStateStore(application)
 	mygo.App.WhenReady(func() {
+		setWorkspaceAppIcon()
 		mygo.Theme.SetSource(preferences.Appearance.themeSource())
 		application.installSessionLifecycle()
 		app, opened := application.prepareWorkspace(initialVault, preferences.Session)
@@ -263,6 +271,9 @@ func (app *workspaceWindow) applyVault(abs string, vault *workspace.Vault, entri
 	app.recentsOpen = false
 	if app.index.stopWatch != nil {
 		app.index.stopWatch()
+	}
+	if app.index.cancelBody != nil {
+		app.index.cancelBody()
 	}
 	app.index = workspaceIndex{attachment: app.index.attachment + 1}
 	app.vaultMapBuilding = false

@@ -22,8 +22,9 @@ var pdfGridWorker []byte
 var pdfGridModule string
 
 func renderPortablePDFGrid(ctx context.Context, w io.Writer, pdf []byte, style pdfThumbnailStyle) error {
-	script := fmt.Sprintf("const pageLimit = %d, maxSide = %d;\n", pdfGridMaxPages, style.maxSide()) + pdfGridModule
-	if err := writePDFGridHeader(w, script, style); err != nil {
+	script := fmt.Sprintf("const pageLimit = %d, maxSide = %d, thumbnailBudget = %d;\n", pdfGridMaxPages, style.maxSide(), pdfGridCacheBytes) +
+		pdfGridViewport + "\n" + pdfGridModule
+	if err := writePDFGridHeader(w, script, style, ""); err != nil {
 		return err
 	}
 	if _, err := io.WriteString(w, `<main id="pages" aria-label="PDF pages"></main><p id="status" role="status">Rendering pages…</p>`); err != nil {

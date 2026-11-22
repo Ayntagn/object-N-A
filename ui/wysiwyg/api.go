@@ -57,7 +57,7 @@ func (b *APIBlock) Height() float32         { return b.object.Height }
 func (b *APIBlock) ReserveHeight(h float32) { b.object.Height = h }
 
 func (s *Session) HasAPIBlocks() bool {
-	return strings.Contains(s.lastMarkdown, "]("+apiAttachmentScheme)
+	return s.hasAPIBlocks
 }
 
 func (s *Session) APIAt(offset int) (*APIBlock, bool) {

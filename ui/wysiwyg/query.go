@@ -41,7 +41,7 @@ func (q *QueryBlock) Height() float32         { return q.object.Height }
 func (q *QueryBlock) ReserveHeight(h float32) { q.object.Height = h }
 
 func (s *Session) HasQueries() bool {
-	return strings.Contains(s.lastMarkdown, "!["+QueryBlockLabel+"]("+queryAttachmentScheme)
+	return s.hasQueries
 }
 
 func (s *Session) QueryAt(offset int) (*QueryBlock, bool) {

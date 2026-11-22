@@ -103,6 +103,8 @@ func renderPDFHTMLWithFigures(doc exportDocument, counter *int) (document, body 
 		*counter = figures.counter
 	}
 	policy := strings.Replace(previewContentPolicy, "script-src ", "script-src '"+pdfPaperScriptHash+"' ", 1)
+	policy = strings.Replace(policy, noteHTMLResourcePolicy, "; img-src data:; media-src 'none'; frame-src 'none'", 1)
+	policy = localAssetConnectPolicy(policy)
 	css := previewMermaidCSS + previewVegaCSS + previewAPICSS + previewCalloutCSS
 	if runtime.GOOS == "darwin" {
 		css += pdfQuartzTextCSS

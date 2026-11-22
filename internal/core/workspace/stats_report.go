@@ -23,9 +23,13 @@ func (v *Vault) ReportEntries() ([]Entry, error) {
 // SidebarEntries lists the visible Vault tree. All also includes regular
 // files outside the supported type list. The reports keep their own scope.
 func (v *Vault) SidebarEntries(all bool) ([]Entry, error) {
-	return readEntries(v.root.FS(), ".", -1, func(file fs.DirEntry) bool {
+	return readEntries(v.root.FS(), ".", -1, sidebarEntryFilter(all))
+}
+
+func sidebarEntryFilter(all bool) func(fs.DirEntry) bool {
+	return func(file fs.DirEntry) bool {
 		return !strings.HasPrefix(file.Name(), ".") && (all || file.IsDir() || isSupportedVaultFile(file.Name()))
-	})
+	}
 }
 
 func isSupportedVaultFile(name string) bool {

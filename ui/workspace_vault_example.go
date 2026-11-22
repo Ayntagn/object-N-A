@@ -80,12 +80,6 @@ func (app *workspaceWindow) openExampleVault(restore bool) {
 
 func applyExampleVaultTemplate(plan workspace.ExampleVaultRestore) (bool, error) {
 	source := os.Getenv("CYBERWRITER_EXAMPLE_VAULT_DIR")
-	if source == "" && runtime.GOOS == "darwin" {
-		installed := "/Applications/cyberWriter.app/Contents/Resources/ExampleVault"
-		if info, err := os.Stat(installed); err == nil && info.IsDir() {
-			source = installed
-		}
-	}
 	if source == "" {
 		builtin, err := workspace.BuiltinExampleVault()
 		if err != nil {

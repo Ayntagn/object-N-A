@@ -29,6 +29,10 @@ type EditorOptions struct {
 	// NoMarkdown turns off the Markdown shortcuts: "# " at the start of a
 	// paragraph making a heading, **bold** making bold, and the others.
 	NoMarkdown bool
+	// OnInput lets the app handle keys or text typed at the selection
+	// before the editor. Return true to take the event. Marked text and
+	// native replacements away from the selection use the usual editor.
+	OnInput func(ev ui.InputEvent) bool
 	// TransformInput adjusts typed text and committed input methods within
 	// the edit's own undo step. Offsets and the number of runes left after
 	// the caret count runes. The callback receives the text and typing

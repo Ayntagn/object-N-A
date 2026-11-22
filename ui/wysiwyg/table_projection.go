@@ -121,6 +121,7 @@ func replaceVisualTable(edit *richtext.Edit, offset int, table *Table) {
 
 func (s *Session) removeVisualTable(offset int, table *Table) {
 	s.Sync(s.draft)
+	s.materializeProjection()
 	var removal *tableRemoval
 	if len(s.tables) == len(s.visualTables) {
 		for i, current := range s.visualTables {
@@ -321,6 +322,13 @@ func supportsTableHTML(tag string) bool {
 		return true
 	}
 	return false
+}
+
+// SupportsMarkdownTable reports whether the complete source can be inserted
+// as a standalone table without losing cells.
+func SupportsMarkdownTable(source string) bool {
+	_, ok := singleTableRegion(source)
+	return ok
 }
 
 func singleTableRegion(source string) (tableRegion, bool) {

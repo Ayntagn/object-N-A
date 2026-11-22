@@ -11,6 +11,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
+	"object-na.local/vectorsearch"
 )
 
 const (
@@ -51,7 +52,7 @@ func Build(ctx context.Context, docs []Document, depth Depth) (*Index, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		d.Chunks[at].Vector = tfidf(terms, d.Frequencies, corpus)
+		d.Chunks[at].setVector(tfidf(terms, d.Frequencies, corpus))
 		progress(at + 1)
 	}
 	if err := ctx.Err(); err != nil {
@@ -137,7 +138,7 @@ func tfidf(counts, frequencies map[string]int, corpusSize int) []float32 {
 		}
 		weights[bucket] += float32(weight)
 	}
-	if norm := vectorNorm(weights); norm > 0 {
+	if norm := vectorsearch.Norm(weights); norm > 0 {
 		for at, weight := range weights {
 			weights[at] = float32(float64(weight) / norm)
 		}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"image"
+	"io"
 	"math"
 	"strconv"
 	"strings"
@@ -14,7 +15,7 @@ import (
 )
 
 func (m *previewMarkup) writeTransformedFigure(src, alt, caption, title, anchor string, transform wysiwyg.ImageTransform) {
-	naturalW, naturalH, ok := previewImageDimensions(src)
+	naturalW, naturalH, ok := m.imageDimensions(src)
 	if !ok {
 		if caption != "" {
 			m.writeCaptionedFigure(src, alt, caption, title, anchor)
@@ -64,14 +65,19 @@ func previewImageDimensions(src string) (width, height int, ok bool) {
 	if !found || !strings.HasPrefix(mime, "data:image/") || !strings.HasSuffix(mime, ";base64") {
 		return 0, 0, false
 	}
-	data := base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
-	config, format, err := image.DecodeConfig(data)
+	return previewRasterDimensions(func() io.Reader {
+		return base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
+	})
+}
+
+func previewRasterDimensions(open func() io.Reader) (width, height int, ok bool) {
+	config, format, err := image.DecodeConfig(open())
 	if err != nil || config.Width <= 0 || config.Height <= 0 {
 		return 0, 0, false
 	}
 	// Both the browser and MyGo apply JPEG orientation when showing the
 	// bitmap. DecodeConfig supplies the encoded axes for the same image.
-	if format == "jpeg" && jpegOrientationSwapsAxes(base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))) {
+	if format == "jpeg" && jpegOrientationSwapsAxes(open()) {
 		return config.Height, config.Width, true
 	}
 	return config.Width, config.Height, true

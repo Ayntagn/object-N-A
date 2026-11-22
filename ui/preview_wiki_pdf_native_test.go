@@ -12,9 +12,9 @@ import (
 )
 
 func TestNativePDFWikilinkRetainsPageAndLabel(t *testing.T) {
-	const relative = "资料/02 二进制练习.pdf"
-	const alias = "示例字符表"
-	const token = "[[02 二进制练习.pdf#page=22|" + alias + "]]"
+	const relative = "资料/02 数制和编码.pdf"
+	const alias = "课件 ASCII 表"
+	const token = "[[02 数制和编码.pdf#page=22|" + alias + "]]"
 	const source = "参见 " + token + "。示例 `" + token + "`。"
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "资料"), 0o700); err != nil {

@@ -15,6 +15,7 @@ import (
 // Vault changes.
 type Index struct {
 	vault         *workspace.Vault
+	retainBody    bool
 	notes         []note
 	byPath        map[string]int
 	byStem        map[string][]int
@@ -52,17 +53,24 @@ func Build(vault *workspace.Vault, entries []workspace.Entry) (*Index, error) {
 }
 
 func build(vault *workspace.Vault, entries []workspace.Entry, readNote func(workspace.Document)) (*Index, error) {
-	return buildSnapshot(vault, entries, nil, readNote)
+	return buildSnapshot(vault, entries, nil, readNote, true)
 }
 
 // Refresh builds the next read-only snapshot, reusing parsed notes whose
 // on-disk identity and change time are unchanged. New paths still participate
 // in resolving links from every note.
 func (previous *Index) Refresh(vault *workspace.Vault, entries []workspace.Entry) (*Index, error) {
-	return buildSnapshot(vault, entries, previous, nil)
+	return buildSnapshot(vault, entries, previous, nil, true)
 }
 
-func buildSnapshot(vault *workspace.Vault, entries []workspace.Entry, previous *Index, readNote func(workspace.Document)) (*Index, error) {
+// RefreshMetadata builds a workspace snapshot for links, tags, properties,
+// and the graph. SearchSidebar reads saved body text as needed. A nil
+// receiver builds the first snapshot.
+func (previous *Index) RefreshMetadata(vault *workspace.Vault, entries []workspace.Entry) (*Index, error) {
+	return buildSnapshot(vault, entries, previous, nil, false)
+}
+
+func buildSnapshot(vault *workspace.Vault, entries []workspace.Entry, previous *Index, readNote func(workspace.Document), retainBody bool) (*Index, error) {
 	if vault == nil {
 		return nil, errors.New("open a Vault before indexing")
 	}
@@ -73,8 +81,8 @@ func buildSnapshot(vault *workspace.Vault, entries []workspace.Entry, previous *
 			return nil, err
 		}
 	}
-	index := &Index{vault: vault, notes: collectNotes(make([]note, 0, countNotes(entries)), entries)}
-	if previous != nil && previous.vault != vault {
+	index := &Index{vault: vault, retainBody: retainBody, notes: collectNotes(make([]note, 0, countNotes(entries)), entries)}
+	if previous != nil && (previous.vault != vault || previous.retainBody != retainBody) {
 		previous = nil
 	}
 	slices.SortFunc(index.notes, func(a, b note) int {
@@ -89,7 +97,7 @@ func buildSnapshot(vault *workspace.Vault, entries []workspace.Entry, previous *
 				old = &previous.notes[from]
 			}
 		}
-		if current.load(vault, old, readNote) {
+		if current.load(vault, old, readNote, retainBody) {
 			same = same && current.entry.Name == old.entry.Name &&
 				current.entry.ModTime() == old.entry.ModTime() && current.entry.Size() == old.entry.Size()
 		} else {
@@ -103,7 +111,7 @@ func buildSnapshot(vault *workspace.Vault, entries []workspace.Entry, previous *
 	return index, nil
 }
 
-func (n *note) load(vault *workspace.Vault, old *note, readNote func(workspace.Document)) (reused bool) {
+func (n *note) load(vault *workspace.Vault, old *note, readNote func(workspace.Document), retainBody bool) (reused bool) {
 	source := n.entry.Path
 	var text string
 	if readNote != nil {
@@ -141,7 +149,9 @@ func (n *note) load(vault *workspace.Vault, old *note, readNote func(workspace.D
 		}
 	}
 	n.graphTags = collectGraphTags(text, properties)
-	n.lowerBody = strings.ToLower(body)
+	if retainBody {
+		n.lowerBody = strings.ToLower(body)
+	}
 	metadata := parseMetadata(properties, body)
 	n.tags = metadata.tags
 	n.links = metadata.links
@@ -239,6 +249,7 @@ func collectNotes(notes []note, entries []workspace.Entry) []note {
 // Search matches each whitespace-delimited term against the path, source body,
 // or tags, without case distinctions. A term starting with # matches a whole tag.
 // Entries are ordered by path. An empty query returns every indexed note.
+// Source body matching requires a snapshot built with Build or Refresh.
 func (index *Index) Search(query string) []workspace.Entry {
 	return index.SearchWithGraphTag(query, "")
 }

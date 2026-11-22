@@ -16,11 +16,11 @@ import (
 
 func TestPreviewResolvesWikiPDFLinksToPages(t *testing.T) {
 	const note = "Notes/Draft.md"
-	const lecture = "02 二进制练习.pdf"
-	const textbook = "逻辑练习：第7版 = Sample Logic Workbook (7th Edition) (example.test, docs.example.test).pdf"
+	const lecture = "02 数制和编码.pdf"
+	const textbook = "逻辑设计基础：第7版 = Fundamentals of Logic Design (7th Edition) (z-library.sk, 1lib.sk, z-lib.sk).pdf"
 	const missing = "[[缺少的附件.pdf#page=4|缺少的附件]]"
 	const literal = "[[" + lecture + "#page=22|示例]]"
-	source := "查 ASCII 表。[[" + lecture + "#page=22|示例字符表]] · [[" + textbook + "#page=33|练习表 1-3]]\n\n" + missing + " `" + literal + "`\n"
+	source := "查 ASCII 表。[[" + lecture + "#page=22|课件 ASCII 表]] · [[" + textbook + "#page=33|教材表 1-3]]\n\n" + missing + " `" + literal + "`\n"
 	root := t.TempDir()
 	for name, body := range map[string]string{
 		note: source, "Slides/" + lecture: "%PDF-1.4\n%%EOF\n", "Books/" + textbook: "%PDF-1.4\n%%EOF\n",
@@ -60,8 +60,8 @@ func TestPreviewResolvesWikiPDFLinksToPages(t *testing.T) {
 		path, label string
 		page        int
 	}{
-		{"Slides/" + lecture, "示例字符表", 22},
-		{"Books/" + textbook, "练习表 1-3", 33},
+		{"Slides/" + lecture, "课件 ASCII 表", 22},
+		{"Books/" + textbook, "教材表 1-3", 33},
 	} {
 		wantURL := fmt.Sprintf(`cyberwriter-pdf://open?page=%d&amp;path=%s`, link.page, url.QueryEscape(link.path))
 		if !strings.Contains(preview, `href="`+wantURL+`">`+link.label+`</a>`) {

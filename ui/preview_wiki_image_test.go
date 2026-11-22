@@ -16,11 +16,11 @@ import (
 
 func TestWikiImageEmbedsResolveVaultPaths(t *testing.T) {
 	const note = "Notes/Draft.md"
-	const source = "![[Pasted image 20260102150405.png]]\n\n![[Assets/笔记 图片.png]]\n\n![[duplicate.png]]\n\n![[ambiguous.png]]"
+	const source = "![[Pasted image 20261010225632.png]]\n\n![[Assets/笔记 图片.png]]\n\n![[duplicate.png]]\n\n![[ambiguous.png]]"
 	root := t.TempDir()
 	files := map[string]string{}
 	for i, relative := range []string{
-		"Screenshots/Pasted image 20260102150405.png",
+		"Screenshots/Pasted image 20261010225632.png",
 		"Assets/笔记 图片.png", "Notes/Assets/笔记 图片.png",
 		"Notes/duplicate.png", "Other/duplicate.png",
 		"Assets/ambiguous.png", "Other/ambiguous.png",
@@ -34,7 +34,7 @@ func TestWikiImageEmbedsResolveVaultPaths(t *testing.T) {
 	}
 	for name, text := range map[string]string{
 		note: source,
-		"Notes/Pasted image 20260102150405.png.md": "Misleading note with a matching stem.",
+		"Notes/Pasted image 20261010225632.png.md": "Misleading note with a matching stem.",
 	} {
 		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte(text), 0o600); err != nil {
 			t.Fatal(err)
@@ -71,7 +71,7 @@ func TestWikiImageEmbedsResolveVaultPaths(t *testing.T) {
 		if strings.Count(body, `<img src="data:image/png;base64,`) != 3 {
 			t.Errorf("%s did not render exactly the three resolved images", name)
 		}
-		for _, relative := range []string{"Screenshots/Pasted image 20260102150405.png", "Assets/笔记 图片.png", "Notes/duplicate.png"} {
+		for _, relative := range []string{"Screenshots/Pasted image 20261010225632.png", "Assets/笔记 图片.png", "Notes/duplicate.png"} {
 			if !strings.Contains(body, files[relative]) {
 				t.Errorf("%s did not embed bytes from %s", name, relative)
 			}

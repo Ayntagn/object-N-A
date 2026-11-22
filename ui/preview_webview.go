@@ -6,6 +6,7 @@ import (
 	"html"
 	"log"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,22 +33,24 @@ const (
 )
 
 var previewChanged = mygo.NewEvent[previewFrame](previewChangeEvent)
+var previewStatsEnabled = os.Getenv("CYBERWRITER_PREVIEW_STATS") == "1"
 
 type previewFrame struct {
-	Revision      uint64  `json:"revision"`
-	Document      uint64  `json:"document"`
-	Title         string  `json:"title"`
-	Label         string  `json:"label,omitempty"`
-	HTML          string  `json:"html"`
-	Theme         string  `json:"theme"`
-	ThemeFonts    string  `json:"themeFonts,omitempty"`
-	CustomCSS     string  `json:"customCSS,omitempty"`
-	ColorEmphasis bool    `json:"colorEmphasis,omitempty"`
-	LineSpacing   float64 `json:"lineSpacing"`
-	ScrollPastEnd bool    `json:"scrollPastEnd"`
-	Anchor        string  `json:"anchor,omitempty"`
-	RevealLine    int     `json:"revealLine,omitempty"`
-	Math          bool    `json:"math,omitempty"`
+	Revision      uint64            `json:"revision"`
+	Document      uint64            `json:"document"`
+	Title         string            `json:"title"`
+	Label         string            `json:"label,omitempty"`
+	HTML          string            `json:"html"`
+	Patch         *previewBodyPatch `json:"patch,omitempty"`
+	Theme         string            `json:"theme"`
+	ThemeFonts    string            `json:"themeFonts,omitempty"`
+	CustomCSS     string            `json:"customCSS,omitempty"`
+	ColorEmphasis bool              `json:"colorEmphasis,omitempty"`
+	LineSpacing   float64           `json:"lineSpacing"`
+	ScrollPastEnd bool              `json:"scrollPastEnd"`
+	Anchor        string            `json:"anchor,omitempty"`
+	RevealLine    int               `json:"revealLine,omitempty"`
+	Math          bool              `json:"math,omitempty"`
 }
 
 type workspacePreview struct {
@@ -61,6 +64,7 @@ type workspacePreview struct {
 	mermaidRequested bool
 	vegaRequested    bool
 	chartFiles       *previewChartFiles
+	localCharts      map[previewChartAssetKey]previewChartAsset
 	zoom             int
 	theme            string
 	editorFont       *documentEditorFont
@@ -87,6 +91,9 @@ type workspacePreview struct {
 	apiVersion       uint64
 	apiDocument      uint64
 	codeCopies       previewCodeCopies
+	transport        previewTransport
+	renderCache      previewRenderCache
+	localImages      map[string]previewLocalImage
 }
 
 func (p *workspacePreview) init(app *workspaceWindow) {
@@ -124,6 +131,7 @@ func (p *workspacePreview) init(app *workspaceWindow) {
 			return
 		}
 		p.awaitingDOM, p.ready = false, false
+		p.clearResources()
 		win.Invalidate()
 	}
 	page.OnDidFailLoad(func(*mygo.LoadError) { loadFailed() })
@@ -136,6 +144,7 @@ func (p *workspacePreview) init(app *workspaceWindow) {
 		p.theme = ""
 		p.zoom = 0
 		p.refreshPending = true
+		p.transport = previewTransport{}
 		p.mathRequested = false
 		p.mermaidRequested = false
 		p.vegaRequested = false
@@ -149,6 +158,14 @@ func (p *workspacePreview) init(app *workspaceWindow) {
 	})
 	page.OnWillNavigate(func(e *mygo.NavigateEvent) {
 		e.PreventDefault()
+		if e.URL == previewTransportResyncURL(p.document) {
+			if p.view == view && p.ready && p.tab == app.workspaceTab {
+				p.transport = previewTransport{}
+				p.refreshPending = true
+				win.Invalidate()
+			}
+			return
+		}
 		if !e.UserInitiated || p.handleCodeCopyNavigation(app, view, e.URL) ||
 			p.handleAPINavigation(app, view, e.URL) || p.handleSnippetNavigation(app, view, e.URL) ||
 			p.handlePDFNavigation(app, view, e.URL) {
@@ -206,6 +223,7 @@ func (p *workspacePreview) refresh() {
 func (p *workspacePreview) returnToDocument(app *workspaceWindow) {
 	view := p.view
 	p.html.close()
+	p.clearResources()
 	*p = workspacePreview{}
 	if view != nil && !view.IsDestroyed() {
 		view.Destroy()
@@ -229,6 +247,9 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 	badge := sourceFileBadge(filename, documentTypeLabels[kind])
 	if kind == documentHTML {
 		p.chartFiles = nil
+		if p.localImages != nil || p.localCharts != nil {
+			p.clearResources()
+		}
 		p.html.draw(c, app, text, zoom)
 		return
 	}
@@ -286,7 +307,7 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 			text = nativeWikiAssets(scroll, text, state.options.Extensions, origin)
 		}
 		scroll.Children(func() {
-			markdown.View(c, nativeHighlightedMarkdown(scroll, text, state.options.Extensions), state.options)
+			nativeMarkdownWithDetails(c, scroll, nativeHighlightedMarkdown(scroll, text, state.options.Extensions), state.options)
 		})
 		return
 	}
@@ -304,6 +325,9 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 		p.tab, p.draft, p.path, p.kind = app.workspaceTab, app.draft, app.document.Path, kind
 		p.apiDocument = 0
 		p.linkVault = nil
+		p.transport = previewTransport{}
+		p.renderCache = previewRenderCache{}
+		p.clearResources()
 		if kind == documentMarkdown {
 			p.parsed = parser.New(webPreviewExtensions)
 		}
@@ -316,6 +340,7 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 	}
 	apiEnabled := kind == documentMarkdown && app.previewAPIEnabled()
 	themeChanged := p.theme != theme.ID || p.editorFont != theme.editorFont
+	stylesheetChanged := p.customCSS != customCSS
 	colorEmphasis := kind == documentMarkdown && !c.Preferences().HighContrast
 	immediate := switched || themeChanged || p.customCSS != customCSS ||
 		p.colorEmphasis != colorEmphasis || p.lineSpacing != spacing || p.scrollPastEnd != app.preferences.ScrollPastEnd ||
@@ -342,14 +367,27 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 		p.numberFigures = app.preferences.NumberFigures
 		p.apiEnabled, p.apiVersion = apiEnabled, app.textVersion
 		p.chartFiles = nil
-		var body string
+		var render livePreviewRender
 		var linkVault *workspace.Vault
+		var images previewImageFrame
+		charts := previewChartAssetFrame{page: p.view.Page(), previous: p.localCharts}
 		title := app.title()
 		copies := previewCodeCopies{revision: p.revision + 1}
+		var renderStart, emitStart time.Time
+		if previewStatsEnabled {
+			renderStart = time.Now()
+		}
 		if kind == documentMarkdown {
 			origin := app.previewOrigin()
 			resources := origin.resources()
 			linkVault = origin.vault
+			if resources != nil && mygo.Protocol.IsHandled(previewImageScheme) {
+				images.previous = p.localImages
+				resources.fileImages = &images
+			}
+			if resources != nil && pageAssetAvailable(charts.page) {
+				resources.chartAssets = &charts
+			}
 			if resources != nil && app.storage == nil && p.path == workspace.VaultHealthFile && vaultindex.IsGeneratedHealthReport(text) {
 				resources.resolveReportNote = vaultindex.HealthReportNoteResolver(app.entries)
 			}
@@ -364,24 +402,55 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 				}
 				markup.apiActions = &previewAPIActions{version: p.apiVersion, document: p.apiDocument}
 			}
-			body, title = markup.render(text, title, true)
+			render = markup.renderLive(text, title, &p.renderCache, previewStatsEnabled)
 			if resources != nil {
 				p.chartFiles = resources.chartFiles
 			}
 		} else if table, ok := renderDelimitedPreview(text, filename, theme.dark()); ok {
-			body = table
+			render.html, render.title = table, title
 		} else {
-			body = sourceFilePreview(text, badge, theme.dark())
+			render.html, render.title = sourceFilePreview(text, badge, theme.dark()), title
+		}
+		var renderTime time.Duration
+		if previewStatsEnabled {
+			renderTime = time.Since(renderStart)
 		}
 		p.revision++
-		hasMath := containsPreviewMath(body)
-		frame := previewFrame{Revision: p.revision, Document: p.document, Title: title, Label: label, HTML: body,
+		frame := previewFrame{Revision: p.revision, Document: p.document, Title: render.title, Label: label,
 			Theme: theme.ID, ThemeFonts: themeFonts, CustomCSS: customCSS, ColorEmphasis: colorEmphasis, LineSpacing: spacing,
-			ScrollPastEnd: p.scrollPastEnd, Anchor: app.previewAnchor, RevealLine: app.previewRevealLine, Math: hasMath}
-		if err := previewChanged.EmitPage(p.view.Page(), frame); err != nil {
+			ScrollPastEnd: p.scrollPastEnd, Anchor: app.previewAnchor, RevealLine: app.previewRevealLine, Math: render.math}
+		if !themeChanged && !stylesheetChanged {
+			frame.Patch = p.transport.patch(p.document, p.revision, render.blocks)
+		}
+		if frame.Patch == nil {
+			frame.HTML = render.fullHTML()
+		}
+		if previewStatsEnabled {
+			emitStart = time.Now()
+		}
+		if p.localImages != nil || images.files != nil {
+			livePreviewImages.publish(p.view.Page(), images.routes)
+			p.localImages = images.files
+		}
+		p.localCharts = charts.publish()
+		err := previewChanged.EmitPage(p.view.Page(), frame)
+		if previewStatsEnabled {
+			emitTime := time.Since(emitStart)
+			payload := len(frame.HTML)
+			if frame.Patch != nil {
+				payload = len(frame.Patch.HTML)
+			}
+			log.Printf("cyberwriter: preview rev=%d patch=%t source_bytes=%d html_bytes=%d payload_html_bytes=%d blocks=%d rendered=%d reused=%d fence_hits=%d prepare_us=%d render_us=%d emit_us=%d",
+				p.revision, frame.Patch != nil, len(text), render.bytes, payload, len(render.blocks), render.rendered, render.reused,
+				render.fenceHits, render.prepare.Microseconds(), renderTime.Microseconds(), emitTime.Microseconds())
+		}
+		if err != nil {
 			p.refreshPending = true
+			p.transport = previewTransport{}
+			p.clearResources()
 			log.Printf("Update Markdown Preview: %v", err)
 		} else {
+			p.transport.commit(p.document, p.revision, render.blocks)
 			p.lastFrameAt = c.Now()
 			p.linkVault = linkVault
 			p.theme, p.editorFont = theme.ID, theme.editorFont
@@ -389,15 +458,15 @@ func (p *workspacePreview) draw(c *mygoui.Context, app *workspaceWindow) {
 			p.codeCopies = copies
 			app.previewAnchor = ""
 			app.previewRevealLine = 0
-			if !p.mathRequested && hasMath {
+			if !p.mathRequested && render.math {
 				p.mathRequested = true
 				go loadPreviewAsset(p.view.Page(), "Math", previewMathLoader)
 			}
-			if !p.mermaidRequested && strings.Contains(body, mermaidBlockStart) {
+			if !p.mermaidRequested && render.mermaid {
 				p.mermaidRequested = true
 				go loadPreviewAsset(p.view.Page(), "Mermaid", mermaidLoader)
 			}
-			if !p.vegaRequested && strings.Contains(body, vegaBlockMarker) {
+			if !p.vegaRequested && render.vega {
 				p.vegaRequested = true
 				go loadPreviewAsset(p.view.Page(), "Vega", vegaLoader)
 			}
@@ -444,8 +513,15 @@ func renderPreviewDocument(doc *parser.Document, text, fallbackTitle string, res
 }
 
 func (m *previewMarkup) render(text, fallbackTitle string, trackLines bool) (body, title string) {
+	m.prepare(text, trackLines)
+	m.blocks(0)
+	m.writeSnippetHoverTemplates()
+	return m.out.String(), m.renderedTitle(fallbackTitle)
+}
+
+func (m *previewMarkup) prepare(text string, trackLines bool) {
 	prefix, _, source := workspace.SplitFrontmatter(text)
-	setPreviewDocument(m.doc, source)
+	m.setSource(source)
 	if m.apiActions != nil {
 		m.apiPrefix = len(prefix)
 		if len(m.doc.Source()) != len(source) {
@@ -456,13 +532,13 @@ func (m *previewMarkup) render(text, fallbackTitle string, trackLines bool) (bod
 	if trackLines {
 		m.lineStarts = previewLineStarts(m.doc.Source(), strings.ContainsRune(prefix, '\n'))
 	}
-	m.blocks(0)
-	m.writeSnippetHoverTemplates()
-	title = m.title
-	if title == "" {
-		title = fallbackTitle
+}
+
+func (m *previewMarkup) renderedTitle(fallback string) string {
+	if m.title != "" {
+		return m.title
 	}
-	return m.out.String(), title
+	return fallback
 }
 
 // previewMarkup renders parsed Markdown for previews and standalone exports.
@@ -480,7 +556,6 @@ type previewMarkup struct {
 	figures            *figureRender
 	lineStarts         []int
 	standalone         standaloneHTMLMode
-	htmlBlocks         bool
 	codeTheme          *editor.Theme
 	codeCopies         *previewCodeCopies
 	liveQueries        bool
@@ -492,7 +567,9 @@ type previewMarkup struct {
 	apiPrefix          int
 	apiOriginalOffsets map[int]int
 	calloutStyles      []callout.Style
+	details            map[int]previewDetailsBoundary
 	quoteDepth         int
+	fenceHighlights    *previewFencePass
 }
 
 func previewLineStarts(source string, strippedFrontmatter bool) []int {
@@ -515,11 +592,15 @@ func (m *previewMarkup) lineAttribute(block *parser.Block) string {
 }
 
 func (m *previewMarkup) lineAttributeAt(offset int) string {
-	line := sort.Search(len(m.lineStarts), func(i int) bool { return m.lineStarts[i] > offset })
+	line := m.sourceLineAt(offset)
 	if line == 0 {
 		return ""
 	}
 	return ` data-source-line="` + strconv.Itoa(line) + `"`
+}
+
+func (m *previewMarkup) sourceLineAt(offset int) int {
+	return sort.Search(len(m.lineStarts), func(i int) bool { return m.lineStarts[i] > offset })
 }
 
 func (m *previewMarkup) blocks(parent int) {
@@ -537,95 +618,102 @@ func (m *previewMarkup) blocksFrom(parent, first int) {
 		if i < first {
 			continue
 		}
-		block := m.doc.Block(i)
-		switch block.Kind {
-		case parser.Paragraph:
-			if parent > 0 {
-				item := m.doc.Block(parent)
-				if item.Kind == parser.Item && m.doc.Block(item.Parent).Tight {
-					m.inlineBlock("", i)
-					continue
-				}
+		m.writeBlock(parent, i, prior)
+	}
+}
+
+func (m *previewMarkup) writeBlock(parent, i, prior int) {
+	block := m.doc.Block(i)
+	switch block.Kind {
+	case parser.Paragraph:
+		if parent > 0 {
+			item := m.doc.Block(parent)
+			if item.Kind == parser.Item && m.doc.Block(item.Parent).Tight {
+				m.inlineBlock("", i)
+				return
 			}
-			m.inlineBlock("p", i)
-		case parser.Heading:
-			m.heading(i, block)
-		case parser.ThematicBreak:
-			fmt.Fprintf(&m.out, "<hr%s>", m.lineAttribute(block))
-		case parser.CodeBlock:
-			source := m.doc.Lines(i)
-			anchor := m.lineAttribute(block)
-			if m.liveQueries && wysiwyg.IsQueryFence(block) {
-				m.writeQueryBlock(strings.TrimSuffix(source, "\n"), anchor)
-				continue
-			}
-			if (m.liveAPIFences || m.embedded) && m.writeLiveAPIFence(i, prior, source, anchor) {
-				continue
-			}
-			if m.charts && block.Fenced && !block.Open {
-				if background, ok := mermaid.Background(block.Info()); ok {
-					fmt.Fprintf(&m.out, mermaidBlockStart+`%s"%s>`, html.EscapeString(background), anchor)
-					if m.standalone != htmlInApp {
-						m.out.WriteString(html.EscapeString(strings.TrimSuffix(source, "\n")))
-					} else {
-						fmt.Fprintf(&m.out, "<code>%s</code>", html.EscapeString(source))
-					}
-					m.out.WriteString("</pre>")
-					continue
-				}
-				if mode := wysiwyg.VegaMode(block.Info()); mode != "" {
-					fmt.Fprintf(&m.out, `<div class="%s"%s`+vegaBlockMarker+`<code class="vega-source">%s</code></div>`,
-						mode, anchor, html.EscapeString(m.preparedVega(source, mode)))
-					continue
-				}
-			}
-			if block.Fenced && !block.Open {
-				m.writeFencedCode(block.Language(), anchor, source)
-				continue
-			}
-			fmt.Fprintf(&m.out, "<pre%s><code>%s</code></pre>", anchor, html.EscapeString(source))
-		case parser.MathBlock:
-			if block.Open {
-				source := m.doc.Source()[block.Start:block.End]
-				fmt.Fprintf(&m.out, `<div class="raw-markup">%s</div>`, html.EscapeString(source))
-			} else {
-				tex := strings.TrimSuffix(m.doc.Lines(i), "\n")
-				fmt.Fprintf(&m.out, `<div class="math-display">%s</div>`, html.EscapeString(tex))
-			}
-		case parser.HTMLBlock:
-			source := m.doc.Lines(i)
-			if m.htmlBlocks {
-				if markup, ok := standaloneHTMLBlock(source); ok {
-					m.out.WriteString(markup)
-					continue
-				}
-			}
-			fmt.Fprintf(&m.out, `<div class="raw-markup">%s</div>`, html.EscapeString(source))
-		case parser.Quote:
-			m.writeQuote(i, block)
-		case parser.List:
-			m.list(i, block)
-		case parser.Item:
-			if block.Task == parser.Unchecked || block.Task == parser.Checked {
-				m.out.WriteString("<li>")
-			} else {
-				fmt.Fprintf(&m.out, "<li%s>", m.lineAttribute(block))
-			}
-			switch block.Task {
-			case parser.Unchecked:
-				m.out.WriteString(`<input type="checkbox" disabled aria-label="Incomplete"> `)
-			case parser.Checked:
-				m.out.WriteString(`<input type="checkbox" checked disabled aria-label="Complete"> `)
-			}
-			m.blocks(i)
-			m.out.WriteString("</li>")
-		case parser.Table:
-			m.table(i, block.Align)
-		case parser.FootnoteDefinition:
-			fmt.Fprintf(&m.out, `<aside class="footnote" id="%s">`, html.EscapeString(footnoteID(block.Label())))
-			m.blocks(i)
-			m.out.WriteString("</aside>")
 		}
+		m.inlineBlock("p", i)
+	case parser.Heading:
+		m.heading(i, block)
+	case parser.ThematicBreak:
+		fmt.Fprintf(&m.out, "<hr%s>", m.lineAttribute(block))
+	case parser.CodeBlock:
+		source := m.doc.Lines(i)
+		anchor := m.lineAttribute(block)
+		if m.liveQueries && wysiwyg.IsQueryFence(block) {
+			m.writeQueryBlock(strings.TrimSuffix(source, "\n"), anchor)
+			return
+		}
+		if (m.liveAPIFences || m.embedded) && m.writeLiveAPIFence(i, prior, source, anchor) {
+			return
+		}
+		if m.charts && block.Fenced && !block.Open {
+			if background, ok := mermaid.Background(block.Info()); ok {
+				fmt.Fprintf(&m.out, mermaidBlockStart+`%s"%s>`, html.EscapeString(background), anchor)
+				if m.standalone != htmlInApp {
+					m.out.WriteString(html.EscapeString(strings.TrimSuffix(source, "\n")))
+				} else {
+					fmt.Fprintf(&m.out, "<code>%s</code>", html.EscapeString(source))
+				}
+				m.out.WriteString("</pre>")
+				return
+			}
+			if mode := wysiwyg.VegaMode(block.Info()); mode != "" {
+				prepared := m.preparedVega(source, mode)
+				var scoped string
+				if m.resources != nil && m.resources.chartAssets != nil && strings.Contains(prepared, localAssetOrigin+"/") {
+					scoped = " data-vega-scoped-values"
+				}
+				fmt.Fprintf(&m.out, `<div class="%s"%s%s`+vegaBlockMarker+`<code class="vega-source">%s</code></div>`,
+					mode, anchor, scoped, html.EscapeString(prepared))
+				return
+			}
+		}
+		if block.Fenced && !block.Open {
+			m.writeFencedCode(block.Language(), anchor, source)
+			return
+		}
+		fmt.Fprintf(&m.out, "<pre%s><code>%s</code></pre>", anchor, html.EscapeString(source))
+	case parser.MathBlock:
+		if block.Open {
+			source := m.doc.Source()[block.Start:block.End]
+			fmt.Fprintf(&m.out, `<div class="raw-markup">%s</div>`, html.EscapeString(source))
+		} else {
+			tex := strings.TrimSuffix(m.doc.Lines(i), "\n")
+			fmt.Fprintf(&m.out, `<div class="math-display">%s</div>`, html.EscapeString(tex))
+		}
+	case parser.HTMLBlock:
+		if m.writeDetailsBoundary(block.Start) {
+			return
+		}
+		if !m.writeNoteHTMLBlock(i, block) {
+			fmt.Fprintf(&m.out, `<div class="raw-markup">%s</div>`, html.EscapeString(m.doc.Lines(i)))
+		}
+	case parser.Quote:
+		m.writeQuote(i, block)
+	case parser.List:
+		m.list(i, block)
+	case parser.Item:
+		if block.Task == parser.Unchecked || block.Task == parser.Checked {
+			m.out.WriteString("<li>")
+		} else {
+			fmt.Fprintf(&m.out, "<li%s>", m.lineAttribute(block))
+		}
+		switch block.Task {
+		case parser.Unchecked:
+			m.out.WriteString(`<input type="checkbox" disabled aria-label="Incomplete"> `)
+		case parser.Checked:
+			m.out.WriteString(`<input type="checkbox" checked disabled aria-label="Complete"> `)
+		}
+		m.blocks(i)
+		m.out.WriteString("</li>")
+	case parser.Table:
+		m.table(i, block.Align)
+	case parser.FootnoteDefinition:
+		fmt.Fprintf(&m.out, `<aside class="footnote" id="%s">`, html.EscapeString(footnoteID(block.Label())))
+		m.blocks(i)
+		m.out.WriteString("</aside>")
 	}
 }
 
@@ -748,13 +836,25 @@ func (m *previewMarkup) inlineGroup(tag string, in []parser.Inline, start, end i
 }
 
 func (m *previewMarkup) inlines(in []parser.Inline, start, end int) {
+	var raw previewInlineHTML
 	for i := start; i < end; i = in[i].Next {
 		n := in[i]
+		if n.Kind == parser.HTML {
+			if raw.hidden == "" {
+				if last, ok := m.writeInlineForeignHTML(in, i, end); ok {
+					i = last
+					continue
+				}
+			}
+			raw.write(m, m.noteHTMLPolicy().InlineTag(n.Text))
+			continue
+		}
+		if raw.hidden != "" {
+			continue
+		}
 		switch n.Kind {
 		case parser.Text:
 			m.highlightProse(n)
-		case parser.HTML:
-			m.out.WriteString(html.EscapeString(n.Text))
 		case parser.SoftBreak:
 			if m.quoteDepth > 0 && callout.ExplicitQuoteBreak(m.rawInline(n), m.quoteDepth) {
 				m.out.WriteString("<br>")
@@ -789,26 +889,38 @@ func (m *previewMarkup) inlines(in []parser.Inline, start, end int) {
 				fmt.Fprintf(&m.out, `<span class="image-description" role="img" aria-label="%s">%s</span>`, html.EscapeString(alt), html.EscapeString(alt))
 			}
 		case parser.FootnoteRef:
-			fmt.Fprintf(&m.out, `<sup><a href="#%s">[%s]</a></sup>`,
-				html.EscapeString(url.PathEscape(footnoteID(n.Text))), html.EscapeString(n.Text))
+			if m.inLink {
+				fmt.Fprintf(&m.out, "<sup>[%s]</sup>", html.EscapeString(n.Text))
+			} else {
+				fmt.Fprintf(&m.out, `<sup><a href="#%s">[%s]</a></sup>`,
+					html.EscapeString(url.PathEscape(footnoteID(n.Text))), html.EscapeString(n.Text))
+			}
 		}
+	}
+	for len(raw.open) > 0 {
+		raw.pop(m)
 	}
 }
 
-func (m *previewMarkup) link(n parser.Inline, in []parser.Inline, start int) {
-	dest := previewExternalURL(n.Dest)
-	external := dest != ""
-	if strings.HasPrefix(n.Dest, "#") {
-		dest = n.Dest
+func (m *previewMarkup) previewLinkDestination(target string) (dest string, external bool) {
+	dest = previewExternalURL(target)
+	external = dest != ""
+	if strings.HasPrefix(target, "#") {
+		dest = target
 	} else if dest == "" && m.standalone != htmlInApp {
-		dest = standaloneRelativeURL(n.Dest)
+		dest = standaloneRelativeURL(target)
 	} else if dest == "" && m.resources != nil && m.resources.index != nil {
-		if target, ok := m.resources.index.ResolveMarkdown(m.relative, n.Dest); ok {
-			parsed, _ := url.Parse(n.Dest)
-			dest = previewNoteURL(m.relative, target, markdown.Slug(parsed.Fragment))
+		if note, ok := m.resources.index.ResolveMarkdown(m.relative, target); ok {
+			parsed, _ := url.Parse(target)
+			dest = previewNoteURL(m.relative, note, markdown.Slug(parsed.Fragment))
 		}
 	}
-	if dest == "" {
+	return dest, external
+}
+
+func (m *previewMarkup) link(n parser.Inline, in []parser.Inline, start int) {
+	dest, external := m.previewLinkDestination(n.Dest)
+	if dest == "" || m.inLink {
 		m.inlines(in, start, n.Next)
 		return
 	}
@@ -829,8 +941,10 @@ func (m *previewMarkup) link(n parser.Inline, in []parser.Inline, start int) {
 
 func footnoteID(label string) string { return "footnote-" + parser.NormalizeLabel(label) }
 
+const noteHTMLResourcePolicy = "; img-src data: https: http:; media-src data: https: http:; frame-src https: http:"
+
 const previewContentPolicy = "default-src 'none'; script-src '" + mermaidScriptHash + "' " + vegaScriptHashes +
-	"; connect-src https: http: data:; img-src data:; font-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
+	"; connect-src https: http: data:" + noteHTMLResourcePolicy + "; font-src data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
 
 // EV-UI-014 and EV-UI-063 record the markup styles and document theme variables.
 var previewStyles = `
@@ -876,7 +990,8 @@ var previewStyles = `
 ` + previewMermaidCSS + previewVegaCSS + previewAPICSS + previewSnippetCSS + previewCalloutCSS + sourceFilePreviewCSS + delimitedPreviewCSS + previewScrollCSS +
 	documentPreviewPalettes + documentThemeElements + documentPreviewLayout + documentPreviewEmphasis + previewCodeCSS
 
-var previewPage = previewHTMLShell("Markdown Preview", "", previewContentPolicy, "", 0, "", "")
+var previewPage = previewHTMLShell("Markdown Preview", "",
+	localAssetConnectPolicy(strings.Replace(previewContentPolicy, "img-src data:", "img-src data: "+previewImageScheme+":", 1)), "", 0, "", "")
 
 var workspacePreviewScript = previewScriptWithMath(`
   function renderMath(preview) {
@@ -920,6 +1035,7 @@ func previewScriptWithMath(math string) string {
   let revision = 0;
   let documentID = 0;
   let pendingMath = null;
+  let previewResyncPending = false;
   function revealPreview(frame) {
     if (frame.anchor) document.getElementById(frame.anchor)?.scrollIntoView();
     if (frame.revealLine > 0) scrollPreview({line: frame.revealLine}, true);
@@ -943,23 +1059,32 @@ func previewScriptWithMath(math string) string {
     const preview = document.querySelector("main");
     if (!preview || frame.revision <= revision) return;
     const sameDocument = frame.document === documentID;
-    if (!sameDocument) resetPreviewScroll();
     const sameTheme = frame.theme === document.documentElement.dataset.previewTheme;
     const scrollY = sameDocument ? window.scrollY : 0;
+    const stylesheet = document.getElementById("custom-stylesheet");
+    const css = frame.customCSS || "";
+    const sameStylesheet = stylesheet.textContent === css;
+    if (frame.patch && (previewResyncPending || !sameDocument || !sameTheme || !sameStylesheet ||
+        frame.patch.baseRevision !== revision || !applyPreviewBodyPatch(preview, frame.patch, frame.revision))) {
+      if (!previewResyncPending) {
+        previewResyncPending = true;
+        window.location.assign("` + previewResyncScheme + `" + frame.document);
+      }
+      return;
+    }
+    previewResyncPending = false;
+    if (!sameDocument) resetPreviewScroll();
     if (!sameTheme || frame.themeFonts) {
       document.documentElement.dataset.previewTheme = frame.theme;
       document.getElementById("preview-theme-fonts").textContent = frame.themeFonts || "";
     }
-    const stylesheet = document.getElementById("custom-stylesheet");
-    const css = frame.customCSS || "";
-    const sameStylesheet = stylesheet.textContent === css;
     if (!sameStylesheet) stylesheet.textContent = css;
     preview.toggleAttribute("data-color-emphasis", frame.colorEmphasis === true);
     setPreviewScrollPadding(frame.scrollPastEnd);
     if (frame.lineSpacing > 0) document.documentElement.style.setProperty("--preview-line-height", String(frame.lineSpacing));
     else document.documentElement.style.removeProperty("--preview-line-height");
     hideSnippetPreview();
-    replacePreviewBody(preview, frame.html, sameDocument && sameTheme && sameStylesheet);
+    if (!frame.patch) replacePreviewBody(preview, frame.html || "", sameDocument && sameTheme && sameStylesheet);
     invalidatePreviewScrollAnchors();
     renderMath(preview);
     renderDiagrams(preview);

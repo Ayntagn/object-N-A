@@ -144,6 +144,7 @@ func (w *workspaceWYSIWYG) drawDisplayFormula(c *mygoui.Context, app *workspaceW
 			if showSource {
 				state.source.Label = f.Language + " source"
 				state.source.Theme, state.source.ReadOnly = displayMathSourceTheme(c, colors.surface, f.IsLaTeX()), readOnly
+				state.source.NoAutoClose = f.IsLaTeX()
 				state.source.OnInput = func(event mygoui.InputEvent) bool { return w.displayMathKey(app, box.Start, f, state, event) }
 				mygoui.Row(c.Key("display math source row")).FillWidth().Height(sourceHeight).Shrink(0).Background(colors.surface).
 					Children(func() {
@@ -334,6 +335,9 @@ func (w *workspaceWYSIWYG) displayMathLanguages(c *mygoui.Context, app *workspac
 func (w *workspaceWYSIWYG) displayMathKey(app *workspaceWindow, offset int, f *wysiwyg.Formula, state *visualDisplayMath, event mygoui.InputEvent) bool {
 	if !w.editable(app) {
 		return false
+	}
+	if !f.IsLaTeX() && externalCodeShortcut(event) && w.editVisualCodeExternally(app, offset) {
+		return true
 	}
 	if w.math.newFence == f && w.math.newFenceVersion == w.session.Document.Version() &&
 		markdownShortcutUndo(event) && !state.source.Buffer.CanUndo() {

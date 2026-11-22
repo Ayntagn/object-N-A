@@ -38,6 +38,10 @@ func SidebarSearchQueryLength(query string) int {
 // paths and tags rank before body-only hits. Body matches read saved source.
 // A nil Index permits search without tags while the index is being built.
 func (index *Index) SearchSidebar(ctx context.Context, vault *workspace.Vault, entries []workspace.Entry, query, graphTag string) []SidebarSearchHit {
+	return index.searchSidebar(ctx, vault, entries, query, graphTag, nil)
+}
+
+func (index *Index) searchSidebar(ctx context.Context, vault *workspace.Vault, entries []workspace.Entry, query, graphTag string, readBody func(string) bool) []SidebarSearchHit {
 	query = TrimSidebarSearchQuery(query)
 	// A typed query takes over the results while the selected tag stays visible.
 	if query != "" {
@@ -83,7 +87,7 @@ func (index *Index) SearchSidebar(ctx context.Context, vault *workspace.Vault, e
 				})
 			}
 			hit := SidebarSearchHit{Entry: entry}
-			if searchBody && sidebarSearchableBody(entry.Path) {
+			if searchBody && sidebarSearchableBody(entry.Path) && (readBody == nil || readBody(entry.Path)) {
 				if document, err := vault.ReadTextDocument(entry.Path); err == nil && ctx.Err() == nil {
 					source := strings.TrimPrefix(document.Text, "\ufeff")
 					if start, end := sidebarSearchRange(source, folded); start >= 0 {

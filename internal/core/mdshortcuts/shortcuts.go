@@ -136,7 +136,7 @@ func (p *Program) Match(in Input) (Expansion, bool) {
 	if !utf8Boundary(in.Markdown, in.Start) || !utf8Boundary(in.Markdown, in.End) || strings.ContainsAny(in.Typed, "\r\n") {
 		return Expansion{}, false
 	}
-	before, selection := in.Markdown[:in.Start], in.Markdown[in.Start:in.End]
+	before, selection, after := in.Markdown[:in.Start], in.Markdown[in.Start:in.End], in.Markdown[in.End:]
 	lineStart := strings.LastIndexByte(before, '\n') + 1
 	line := before[lineStart:] + in.Typed
 	best := -1
@@ -169,7 +169,11 @@ func (p *Program) Match(in Input) (Expansion, bool) {
 			retained = in.Typed[:start-len(before)]
 			prefix += retained
 		}
-		if !rule.Scope.allows(markdownMode(prefix)) || rule.WholeWord && !atWordEdges(prefix, in.Markdown[in.End:]) {
+		contents := line[start-lineStart:]
+		if rule.visual {
+			contents = selection
+		}
+		if rule.WholeWord && !atWordEdges(prefix, after) || !rule.Scope.allows(markdownMode(prefix, contents, after)) {
 			continue
 		}
 		result = Expansion{

@@ -1,4 +1,4 @@
-// spec: FEAT-001 / Markdown Shortcuts
+// spec: FEAT-001 / EV-MYGO-302 / Markdown Shortcuts
 package mdshortcuts
 
 import "testing"
@@ -6,6 +6,7 @@ import "testing"
 func TestMatchesTypedMathAndTabTextInMarkdown(t *testing.T) {
 	p, err := Compile([]Rule{
 		{Trigger: "ff", Replacement: `\frac{${0:num}}{${1:den}}`, Scope: Math, Enabled: true, Automatic: true},
+		{Trigger: "sr", Replacement: `^{2}`, Scope: Math, Enabled: true, Automatic: true},
 		{Trigger: ";note", Replacement: "## ${0:Heading}", Scope: Text, Enabled: true},
 		{Trigger: "off", Replacement: "not active", Scope: Text, Enabled: false, Automatic: true},
 	})
@@ -13,24 +14,31 @@ func TestMatchesTypedMathAndTabTextInMarkdown(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tt := range []struct {
-		input, typed string
-		start, stops int
-		template     string
+		before, typed, after string
+		start, stops         int
+		template             string
 	}{
-		{`$f`, `f`, 1, 2, `\\frac{${1:num}\}{${2:den}\}`},
-		{"$$\nf", `f`, 3, 2, `\\frac{${1:num}\}{${2:den}\}`},
-		{"🙂 ;note", "", len("🙂 "), 1, "## ${1:Heading}"},
-		{`ff`, "", 0, 0, ""},
-		{`f`, `f`, 0, 0, ""},
-		{"```md\n$f", `f`, 0, 0, ""},
-		{"`$f", `f`, 0, 0, ""},
-		{`\$f`, `f`, 0, 0, ""},
-		{`$;note`, "", 0, 0, ""},
-		{`of`, `f`, 0, 0, ""},
+		{`$f`, `f`, `$`, 1, 2, `\\frac{${1:num}\}{${2:den}\}`},
+		{`$`, `ff`, `$`, 1, 2, `\\frac{${1:num}\}{${2:den}\}`},
+		{"$$\nf", `f`, "", 3, 2, `\\frac{${1:num}\}{${2:den}\}`},
+		{"🙂 ;note", "", "", len("🙂 "), 1, "## ${1:Heading}"},
+		{`$GOPATH/s`, `r`, "", 0, 0, ""},
+		{`$GOPATH/s`, `r`, `/ 路径 $x$`, 0, 0, ""},
+		{`$GOPATH/src/ 路径 $xs`, `r`, `$`, len(`$GOPATH/src/ 路径 $x`), 0, `^{2\}`},
+		{`$f`, `f`, `\$`, 0, 0, ""},
+		{`$f`, `f`, " `$`", 0, 0, ""},
+		{`ff`, "", "", 0, 0, ""},
+		{`f`, `f`, "", 0, 0, ""},
+		{"```md\n$f", `f`, `$`, 0, 0, ""},
+		{"`$f", `f`, "$`", 0, 0, ""},
+		{`\$f`, `f`, `$`, 0, 0, ""},
+		{`$;note`, "", "", 1, 1, "## ${1:Heading}"},
+		{"$path `;note", "", "`", 0, 0, ""},
+		{`of`, `f`, "", 0, 0, ""},
 	} {
-		got, ok := p.Match(Input{Markdown: tt.input, Start: len(tt.input), End: len(tt.input), Typed: tt.typed})
+		got, ok := p.Match(Input{Markdown: tt.before + tt.after, Start: len(tt.before), End: len(tt.before), Typed: tt.typed})
 		if ok != (tt.template != "") || got.Start != tt.start || got.Template != tt.template || got.TabStops != tt.stops {
-			t.Errorf("%q typed %q → %+v (match %t)", tt.input, tt.typed, got, ok)
+			t.Errorf("%q typed %q before %q → %+v (match %t)", tt.before, tt.typed, tt.after, got, ok)
 		}
 	}
 }

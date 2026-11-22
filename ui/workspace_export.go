@@ -18,6 +18,7 @@ import (
 	"cyberwriter/internal/core/exportdoc"
 	"github.com/egoist/mygo"
 	mygoui "github.com/egoist/mygo/ui"
+	"object-na.local/pdfthumb"
 )
 
 type workspaceExportPreferences struct {
@@ -979,7 +980,11 @@ type pdfViewer struct {
 	pendingFile, activeFile string
 	grid                    bool
 	thumbnailStyle          pdfThumbnailStyle
+	gridRenderedStyle       pdfThumbnailStyle
+	thumbnailStyleVersion   uint64
+	thumbnailCache          *pdfthumb.Scheduler
 	gridFile, gridProblem   string
+	gridContext             context.Context
 	gridCancel              context.CancelFunc
 	loadTimer, debounce     *time.Timer
 	refitTimer              *time.Timer
@@ -1053,6 +1058,7 @@ func (p *pdfViewer) drawLayout(c *mygoui.Context, win *mygo.Window, file string,
 	if !p.ready {
 		return
 	}
+	p.applyThumbnailStyle()
 	if zoom > 0 && p.zoom != zoom {
 		p.zoom = zoom
 		p.view.setZoom(zoom)
@@ -1143,6 +1149,10 @@ func (p *pdfViewer) load(win *mygo.Window, data []byte) error {
 	p.directory = dir
 	path := filepath.Join(dir, "preview.pdf")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
+		p.clearView()
+		return err
+	}
+	if err := registerPDFGridProtocol(); err != nil {
 		p.clearView()
 		return err
 	}
@@ -1237,6 +1247,7 @@ func (p *pdfViewer) clearView() {
 		p.loadTimer = nil
 	}
 	p.clearThumbnails()
+	p.thumbnailCache = nil
 	if p.view != nil {
 		view := p.view
 		p.view = nil

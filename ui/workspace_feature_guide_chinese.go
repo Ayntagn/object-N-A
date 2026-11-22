@@ -186,9 +186,9 @@ var featureGuideChineseCopy = map[string]featureGuideCopy{
 		points: []string{"选择大纲中的标题即可在当前文档中定位。"},
 	},
 	"smartpaste": {
-		title: "智能粘贴", summary: "粘贴纯文本或带格式的内容，然后检查编辑器生成的 Markdown。",
-		hints:  []string{"⌘ V", "切到所见即所得模式处理富文本剪贴板", "粘贴后检查源文"},
-		points: []string{"当剪贴板中的表格格式需要修正时，可使用表格编辑器。"},
+		title: "智能粘贴", summary: "粘贴 Markdown 或带格式的文字，保留标题、列表和代码。",
+		hints:  []string{"⌘ V", "源码、分栏或所见即所得"},
+		points: []string{"把 Markdown 表格粘贴到所见即所得模式即可编辑单元格。"},
 	},
 	"selectiontoolbar": {
 		title: "选区工具栏", summary: "原版在选中的文字旁显示格式工具。",

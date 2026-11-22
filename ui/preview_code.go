@@ -93,7 +93,7 @@ func (m *previewMarkup) writeFencedCode(language, anchor, source string) {
 		fmt.Fprintf(&m.out, `<div class="preview-code-block"><div class="preview-code-header"><a class="preview-code-copy" href="%s" aria-label="Copy %s code" title="Copy code"><span aria-live="polite">%s</span></a></div>`,
 			m.codeCopies.register(source), tag, tag)
 	}
-	if m.codeTheme == nil || !m.writeHighlightedFence(language, anchor, source) {
+	if m.codeTheme == nil || !m.writeLiveHighlightedFence(language, anchor, source) {
 		fmt.Fprintf(&m.out, "<pre%s><code>%s</code></pre>", anchor, html.EscapeString(source))
 	}
 	if interactive {

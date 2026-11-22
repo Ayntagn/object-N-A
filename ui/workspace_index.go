@@ -10,23 +10,27 @@ import (
 	"cyberwriter/internal/core/vaultindex"
 	"cyberwriter/internal/core/workspace"
 	"github.com/egoist/mygo"
+	"object-na.local/vaultdelta"
 )
 
 type workspaceIndex struct {
-	data        *vaultindex.Index
-	wikiImages  *wikiImageNames
-	wikiPDFs    *wikiPDFIndex
-	attachment  uint64
-	generation  uint64
-	building    bool
-	scanning    bool
-	pendingHint bool
-	stopWatch   context.CancelFunc
+	data         *vaultindex.Index
+	wikiImages   *wikiImageNames
+	wikiPDFs     *wikiPDFIndex
+	attachment   uint64
+	generation   uint64
+	building     bool
+	scanning     bool
+	pendingHints vaultdelta.Scope
+	stopWatch    context.CancelFunc
+	bodyCache    string
+	cancelBody   context.CancelFunc
 }
 
 func (app *workspaceWindow) requestIndex() {
 	app.index.generation++
 	app.buildIndex(app.index.data)
+	app.refreshSidebarBodyIndex()
 	app.syncAIVaultContext()
 }
 
@@ -38,7 +42,7 @@ func (app *workspaceWindow) buildIndex(previous *vaultindex.Index) {
 	vault, entries, win := app.vault, app.entries, app.win
 	attachment, generation := app.index.attachment, app.index.generation
 	go func() {
-		index, err := previous.Refresh(vault, entries)
+		index, err := previous.RefreshMetadata(vault, entries)
 		win.Update(func() {
 			if win.IsDestroyed() || app.vault != vault || app.index.attachment != attachment {
 				return
@@ -86,10 +90,10 @@ func (app *workspaceWindow) startVaultWatch() {
 	ctx, cancel := context.WithCancel(context.Background())
 	app.index.stopWatch = cancel
 	win, root := app.win, app.root
-	scan := func(hint bool) {
+	scan := func(hints vaultdelta.Scope) {
 		mygo.RunOnMain(func() {
 			if ctx.Err() == nil && !win.IsDestroyed() {
-				app.scanVault(hint)
+				app.scanVault(hints)
 			}
 		})
 	}
@@ -103,25 +107,36 @@ func (app *workspaceWindow) startVaultWatch() {
 				return strings.HasPrefix(path.Base(relative), ".")
 			},
 		})
-		if err != nil {
-			pollVault(ctx, scan)
-			return
-		}
-		// Refresh once the watch is enrolled to cover the interval between
-		// the initial directory snapshot and the first observable event.
-		scan(true)
-		for {
-			if _, err := watch.Next(ctx); err != nil {
-				break
+		if err == nil {
+			// Reconcile the interval between the initial snapshot and enrollment.
+			scan(vaultdelta.Hints("."))
+			for {
+				events, err := watch.Next(ctx)
+				if err != nil {
+					break
+				}
+				directories := make([]string, 0, len(events))
+				for _, event := range events {
+					if event.Op != mygo.FileHint || !event.IsDir {
+						directories = []string{"."}
+						break
+					}
+					directories = append(directories, event.Path)
+				}
+				if len(directories) == 0 {
+					directories = append(directories, ".")
+				}
+				scan(vaultdelta.Hints(directories...))
 			}
-			scan(true)
+			watch.Close()
 		}
-		watch.Close()
+		// Reconcile any changes lost before switching to polling.
+		scan(vaultdelta.Hints("."))
 		pollVault(ctx, scan)
 	}()
 }
 
-func pollVault(ctx context.Context, scan func(bool)) {
+func pollVault(ctx context.Context, scan func(vaultdelta.Scope)) {
 	ticks := time.NewTicker(2 * time.Second)
 	defer ticks.Stop()
 	for {
@@ -129,17 +144,18 @@ func pollVault(ctx context.Context, scan func(bool)) {
 		case <-ctx.Done():
 			return
 		case <-ticks.C:
-			scan(false)
+			scan(vaultdelta.Scope{})
 		}
 	}
 }
 
-func (app *workspaceWindow) scanVault(hint bool) {
+func (app *workspaceWindow) scanVault(hints vaultdelta.Scope) {
 	if app.index.scanning {
-		app.index.pendingHint = app.index.pendingHint || hint
+		app.index.pendingHints = app.index.pendingHints.Merge(hints)
 		return
 	}
 	vault, win := app.vault, app.win
+	previous := app.entries
 	attachment, generation := app.index.attachment, app.index.generation
 	all := app.preferences.VaultShowAllFiles
 	var chartFiles *previewChartFiles
@@ -148,7 +164,12 @@ func (app *workspaceWindow) scanVault(hint bool) {
 	}
 	app.index.scanning = true
 	go func() {
-		entries, count, err := readWorkspaceEntries(vault, all)
+		entries, _, err := vault.RefreshSidebarEntries(previous, all, hints)
+		changed := err == nil && !reflect.DeepEqual(previous, entries)
+		var count int
+		if changed {
+			count = countVaultFiles(entries)
+		}
 		chartChanged := chartFiles.changed()
 		mygo.RunOnMain(func() {
 			if win.IsDestroyed() || app.vault != vault || app.index.attachment != attachment {
@@ -161,22 +182,21 @@ func (app *workspaceWindow) scanVault(hint bool) {
 			}
 			if generation != app.index.generation {
 				// A newer explicit refresh or save may have superseded this
-				// scan. Carry its filesystem hint to the current snapshot.
-				app.index.pendingHint = app.index.pendingHint || hint
+				// scan. Apply its hints again to the current snapshot.
+				app.index.pendingHints = app.index.pendingHints.Merge(hints)
 			} else if err == nil {
-				changed := !reflect.DeepEqual(app.entries, entries)
 				if changed {
 					app.vaultFileCount = count
 					app.updateEntries(entries)
 					win.Invalidate()
 				}
-				if changed || hint {
+				if changed || !hints.Empty() {
 					app.requestIndex()
 				}
 			}
-			if app.index.pendingHint {
-				app.index.pendingHint = false
-				app.scanVault(true)
+			if pending := app.index.pendingHints; !pending.Empty() {
+				app.index.pendingHints = vaultdelta.Scope{}
+				app.scanVault(pending)
 			}
 		})
 	}()

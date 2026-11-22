@@ -54,7 +54,6 @@ func renderStandaloneHTML(doc exportDocument, mode standaloneHTMLMode, figureCou
 		markup := previewMarkup{
 			doc: parser.New(webPreviewExtensions), resources: doc.origin.resources(), relative: doc.origin.note,
 			charts: true, figures: &figures, standalone: mode, codeTheme: previewCodeTheme(theme.dark()),
-			htmlBlocks:    doc.kind == documentMarkdown || doc.kind == documentUndetermined,
 			liveAPIFences: doc.kind == documentMarkdown || doc.kind == documentUndetermined,
 			calloutStyles: doc.calloutStyles(),
 		}

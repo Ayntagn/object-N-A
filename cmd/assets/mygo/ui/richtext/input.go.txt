@@ -14,6 +14,10 @@ const scrollbarWidth = 10
 func (v *view) input(ev ui.InputEvent) bool {
 	v.sync()
 	defer v.publish()
+	if (ev.Kind == ui.InputText || ev.Kind == ui.InputKeyDown) && v.offerInput(ev) {
+		v.blinkStart = ev.Time
+		return true
+	}
 	switch ev.Kind {
 	case ui.InputKeyDown:
 		if v.key(ev.Key, ev.Mods) {
@@ -50,6 +54,17 @@ func (v *view) input(ev ui.InputEvent) bool {
 		return v.scroll != before
 	}
 	return false
+}
+
+func (v *view) offerInput(ev ui.InputEvent) bool {
+	if v.opts.ReadOnly || v.composing || v.opts.OnInput == nil || !v.opts.OnInput(ev) {
+		return false
+	}
+	// The app may have edited the document or moved its selection.
+	v.sync()
+	v.coalesce = false
+	v.reveal = true
+	return true
 }
 
 // moveTo puts the caret at i, extending the selection or not.

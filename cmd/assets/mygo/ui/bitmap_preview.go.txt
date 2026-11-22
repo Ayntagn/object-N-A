@@ -1,0 +1,86 @@
+package ui
+
+import (
+	"bytes"
+	"image"
+
+	"github.com/egoist/mygo/internal/scene"
+)
+
+// DecodeBitmapPreview seeds a display level before the first draw and decodes
+// the original on demand. shrink receives the upright original dimensions
+// and returns the ratio of source pixels to device pixels.
+//
+// decode makes an unrotated preview whose dimensions are each rounded up
+// after division by 2, 4, or 8. It must validate the complete input. Returning
+// nil without an error opts out and uses DecodeBitmap. Keep data unchanged
+// while the bitmap or one of its renderers can use it.
+func DecodeBitmapPreview(data []byte, shrink func(w, h int) float32,
+	decode func(data []byte, denominator int) (image.Image, error)) (*Bitmap, error) {
+	if shrink == nil || decode == nil {
+		return DecodeBitmap(data)
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || cfg.Width < 1 || cfg.Height < 1 {
+		return DecodeBitmap(data)
+	}
+	width, height := cfg.Width, cfg.Height
+	orientation := exifOrientation(data)
+	if orientation >= 5 {
+		width, height = height, width
+	}
+	downsample := shrink(width, height)
+	var level int
+	switch {
+	case downsample >= 8:
+		level = 3
+	case downsample >= 4:
+		level = 2
+	case downsample >= 2:
+		level = 1
+	default:
+		return DecodeBitmap(data)
+	}
+	denominator := 1 << level
+	makePreview := func() (*scene.Image, error) {
+		img, err := decode(data, denominator)
+		if err != nil || img == nil {
+			return nil, err
+		}
+		bounds := img.Bounds()
+		if bounds.Dx() != (cfg.Width+denominator-1)/denominator ||
+			bounds.Dy() != (cfg.Height+denominator-1)/denominator {
+			return nil, nil
+		}
+		s := scene.NewImage(img)
+		if orientation > 1 {
+			s = orient(s, orientation)
+		}
+		return s, nil
+	}
+	first, err := makePreview()
+	if err != nil {
+		return nil, err
+	}
+	if first == nil {
+		return DecodeBitmap(data)
+	}
+	bitmap := &Bitmap{
+		img: scene.NewImageRGBA(width, height, nil), w: width, h: height,
+		levels: make([]*scene.Image, level), fresh: level,
+		previewLevel: level, preview: makePreview,
+		remake: func() (*scene.Image, error) { return decodeImage(data) },
+	}
+	bitmap.levels[level-1] = first
+	bitmap.img.Restore = bitmap.originalPixels
+	return bitmap, nil
+}
+
+// PixelScale returns how many device pixels a DIP in this view covers,
+// including the content zoom. It returns 1 outside a view's lifetime.
+func (c *Context) PixelScale() float32 {
+	if rt := c.runtime(); rt != nil && rt.painted[2] > 0 {
+		return rt.painted[2]
+	}
+	return 1
+}

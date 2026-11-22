@@ -98,10 +98,12 @@ type previewResources struct {
 	wikiPDFs          *wikiPDFIndex
 	resolveReportNote func(string) (string, bool)
 	images            map[string]string
+	fileImages        *previewImageFrame
 	remaining         int64
 	embeds            int
 	chartFiles        *previewChartFiles
 	chartContents     map[string]string
+	chartAssets       *previewChartAssetFrame
 }
 
 type previewResourceOrigin struct {
@@ -317,7 +319,7 @@ func (m *previewMarkup) embedParagraph(in []parser.Inline, anchor string) bool {
 	res.embeds++
 	if m.standalone != htmlInApp {
 		child := previewMarkup{doc: parser.New(m.doc.Extensions()), resources: res, relative: relative, embedded: true,
-			charts: m.charts, figures: m.figures, standalone: m.standalone, htmlBlocks: m.htmlBlocks, codeTheme: m.codeTheme,
+			charts: m.charts, figures: m.figures, standalone: m.standalone, codeTheme: m.codeTheme,
 			calloutStyles: m.calloutStyles}
 		body, _ := child.render(doc.Text, "", true)
 		body = child.fillWikiFigures(body)
@@ -327,7 +329,7 @@ func (m *previewMarkup) embedParagraph(in []parser.Inline, anchor string) bool {
 	_, _, body := workspace.SplitFrontmatter(doc.Text)
 	child := previewMarkup{doc: parser.New(m.doc.Extensions()), resources: res, relative: relative, embedded: true,
 		charts: m.charts, figures: m.figures, codeTheme: m.codeTheme, codeCopies: m.codeCopies, calloutStyles: m.calloutStyles}
-	setPreviewDocument(child.doc, body)
+	child.setSource(body)
 	child.blocks(0)
 	fmt.Fprintf(&m.out, `<aside class="note-embed"%s>`, anchor)
 	m.wikilink(link)
@@ -362,6 +364,17 @@ func (m *previewMarkup) imageSource(destination string, wiki bool) string {
 		limit := min(res.remaining, 4<<20)
 		if limit <= 0 {
 			break
+		}
+		if res.fileImages != nil {
+			asset, ok := res.fileImages.add(res.vault, relative, limit)
+			if !ok {
+				res.images[relative] = ""
+				continue
+			}
+			res.remaining -= asset.bytes
+			src := previewImageOrigin + asset.route
+			res.images[relative] = src
+			return src
 		}
 		image, mime, err := res.vault.ReadPreviewImage(relative, limit)
 		if err != nil {

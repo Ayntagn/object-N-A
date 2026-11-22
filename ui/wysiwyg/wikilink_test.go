@@ -8,8 +8,8 @@ import (
 )
 
 func TestPDFWikilinkAliasSurvivesVisualEdit(t *testing.T) {
-	const target = "资料/02 二进制练习 (7th Edition, docs.example.test).pdf#page=22"
-	const alias = "示例字符表"
+	const target = "资料/02 数制和编码 (7th Edition, z-lib.sk).pdf#page=22"
+	const alias = "课件 ASCII 表"
 	const token = "[[ " + target + " | " + alias + " ]]"
 	const source = "参见 " + token + "。\n"
 	draft := editor.NewBuffer(source)

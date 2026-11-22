@@ -32,20 +32,21 @@ func TestExportHTMLIncludesSafeStandaloneContent(t *testing.T) {
 		"<!doctype html>", "Content-Security-Policy", "<title>中文 &amp; notes</title>",
 		`<article class="markdown-body">`, `content="width=684, initial-scale=1.0"`, `data-source-line="1"`,
 		`--doc-font-size: 17pt`, `--doc-background: #fffef0`, `--preview-line-height:1.75`,
-		`<strong>Draft</strong>`, `&lt;script&gt;`, `<span class="math-inline">x^2</span>`,
+		`<strong>Draft</strong>`, `<span class="math-inline">x^2</span>`,
 		`href="https://example.invalid/" target="_blank" rel="noopener noreferrer"`,
 		`href="folder/Note.md#part"`, `href="Missing note.md"`, `src="figures/absent.png"`,
 		wikiAnchor,
 		`class="hljs language-go"`, `<hr class="page-break">`, `<code>[pagebreak]</code>`,
 		`<div class="sample-raw">Original raw <strong>block</strong></div>`,
-		`An inline &lt;b&gt;literal&lt;/b&gt;.`,
-		`&lt;div class=&#34;custom math-inline&#34;&gt;Literal math marker`,
+		`An inline <b>literal</b>.`,
+		`<div class="custom">Literal math marker</div>`,
 	} {
 		if !strings.Contains(result, fragment) {
 			t.Errorf("HTML form export is missing %q", fragment)
 		}
 	}
-	if strings.Contains(result, "<script>alert('x')</script>") || strings.Contains(result, `href="javascript:`) {
+	if strings.Contains(result, "alert('x')") || strings.Contains(result, `href="javascript:`) ||
+		strings.Contains(result, `class="custom math-inline"`) {
 		t.Error("HTML export activated a script or an unsafe link")
 	}
 	shared, err := renderSharedHTML(doc, false)
@@ -64,7 +65,7 @@ func TestExportHTMLIncludesSafeStandaloneContent(t *testing.T) {
 		t.Fatalf("browser preview did not reuse the Share markup: %v", err)
 	}
 	_, pdfBody := renderPDFHTML(doc)
-	if !strings.Contains(pdfBody, `&lt;div class=&#34;sample-raw&#34;&gt;`) {
-		t.Error("PDF preview did not keep the literal source of the raw block")
+	if !strings.Contains(pdfBody, `<div class="sample-raw">Original raw <strong>block</strong></div>`) {
+		t.Error("PDF preview did not render the allowed HTML block")
 	}
 }

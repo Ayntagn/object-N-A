@@ -19,7 +19,7 @@ an [unsafe destination](javascript:void%280%29).
 
 ![alt text](https://example.invalid/image.png)
 
-<iframe src="https://example.invalid/embed"></iframe>
+<iframe src="local-preview.html"></iframe>
 `
 	body, title := renderPreview(parser.New(parser.GFM), src, "fixture.md")
 	if title != "Fixture" {
@@ -27,17 +27,16 @@ an [unsafe destination](javascript:void%280%29).
 	}
 	for _, want := range []string{
 		`<h1 id="fixture">Fixture</h1>`,
-		`&lt;b&gt;literal&lt;/b&gt;`,
+		`<b>literal</b>`,
 		`<a href="https://example.invalid/reference">reference</a>`,
 		`an unsafe destination.`,
 		`alt text</span>`,
-		`&lt;iframe src=`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("preview did not render %q in %s", want, body)
 		}
 	}
-	for _, unwanted := range []string{`<b>`, `<iframe`, `<img`, `href="javascript:`, `image.png`} {
+	for _, unwanted := range []string{`<iframe`, `<img`, `href="javascript:`, `image.png`} {
 		if strings.Contains(body, unwanted) {
 			t.Errorf("preview emitted %q as active markup in %s", unwanted, body)
 		}
@@ -68,9 +67,9 @@ func TestPreviewPreservesFormulaBoundaries(t *testing.T) {
 
 // spec: FEAT-001 / EV-MYGO-287
 func TestPreviewRendersDigitLeadingInlineMath(t *testing.T) {
-	source := `价格 $5 和 $12.00。符号 $ 单独出现。指数例子 $2^{n-1}$  随后有负数 $-N$，再写 $\bar{N}=(2^{n}-1)-N$。系数 $2$，小数 $123.45$。`
+	source := `余额 $5 和 $12.00， $ 有正零和负零之分。错误仅发生在和的绝对值大于 $2^{n-1}$ 时。负数 $-N$ 的反码为 $\bar{N}=(2^{n}-1)-N$。系数 $2$，小数 $123.45$。`
 	body, _ := renderPreview(parser.New(webPreviewExtensions), source, "Formula boundaries")
-	want := `价格 $5 和 $12.00。符号 $ 单独出现。指数例子 <span class="math-inline">2^{n-1}</span>  随后有负数 <span class="math-inline">-N</span>，再写 <span class="math-inline">\bar{N}=(2^{n}-1)-N</span>。系数 <span class="math-inline">2</span>，小数 <span class="math-inline">123.45</span>。`
+	want := `余额 $5 和 $12.00， $ 有正零和负零之分。错误仅发生在和的绝对值大于 <span class="math-inline">2^{n-1}</span> 时。负数 <span class="math-inline">-N</span> 的反码为 <span class="math-inline">\bar{N}=(2^{n}-1)-N</span>。系数 <span class="math-inline">2</span>，小数 <span class="math-inline">123.45</span>。`
 	if !strings.Contains(body, want) {
 		t.Fatalf("preview = %s, want %s", body, want)
 	}

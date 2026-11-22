@@ -35,7 +35,7 @@ func BuildContextual(ctx context.Context, docs []Document, depth Depth, modelID 
 		if !validVector(vector, d.Dimension) {
 			return nil, errEmbeddingVector
 		}
-		chunk.Vector = slices.Clone(vector)
+		chunk.setVector(slices.Clone(vector))
 		progress(at + 1)
 	}
 	if err := ctx.Err(); err != nil {
