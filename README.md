@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="ui/app_icon.png" width="112" height="112" alt="object-N/A 应用图标" />
-
 # object-N/A
 
 **一个基于 Go 与 MyGo 构建的本地优先 Markdown 知识工作区**
@@ -46,16 +44,6 @@
 ---
 
 ## 与 Obsidian 的性能对比
-
-<div align="center">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/benchmark-dark.svg" />
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/benchmark-light.svg" />
-  <img alt="object-N/A v0.4.0 与 Obsidian 1.15.1 性能对比" src="docs/assets/benchmark-dark.svg" width="100%" />
-</picture>
-</div>
-
-<br />
 
 测试环境为 **Apple M5、24 GiB 内存、macOS 27.0.1**。两款应用打开同一份包含 **4,501 篇笔记** 的合成 Vault，并在同一篇约 **119 KiB** 的 Markdown 文档上回放分栏编辑。下表为三组交替运行的中位数（内存包含主进程及 WebKit 或 Electron 辅助进程，CPU 以单个核心为 100%）：
 
